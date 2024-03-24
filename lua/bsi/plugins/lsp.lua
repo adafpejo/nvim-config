@@ -16,6 +16,25 @@ return {
     -- correctly setup lspconfig
     {
         "neovim/nvim-lspconfig",
+        init = function()
+            local keys = require("lazyvim.plugins.lsp.keymaps").get()
+            keys[#keys + 1] = {
+                "gd",
+                function()
+                    vim.lsp.buf.definition()
+                end,
+                desc = "Goto Definition",
+                has = "definition",
+            }
+            keys[#keys + 1] = {
+                "gr",
+                function()
+                    require("telescope.builtin").lsp_references()
+                end,
+                desc = "Goto Definition",
+                has = "definition",
+            }
+        end,
         opts = {
             -- make sure mason installs the server
             servers = {
@@ -23,9 +42,7 @@ return {
                     root_dir = get_root_dir,
                 },
                 tsserver = {
-                    path = "",
                     root_dir = get_root_dir,
-                    single_file_support = false,
                     settings = {
                         typescript = {
                             inlayHints = {

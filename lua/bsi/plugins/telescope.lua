@@ -14,28 +14,17 @@ return {
                     require("project_nvim").setup({
                         patterns = {
                             ".git",
-                            "_darcs",
-                            ".hg",
-                            ".bzr",
-                            ".svn",
-                            "Makefile",
-                            "package.json",
-                            "pyproject.toml",
-                            "poetry.lock",
                             "go.mod",
+                        },
+                        base_dirs = {
+                            { "~/_git", max_depth = 3 },
+                            { "~/_semhub", max_depth = 3 },
+                            { "~/_my", max_depth = 3 },
                         },
                     })
                 end,
             },
         },
-        -- config = function(_, opts)
-        --     local telescope = require("telescope")
-        --     telescope.setup(opts)
-        --     telescope.load_extension("fzf")
-        --     telescope.load_extension("live_grep_args")
-        --     telescope.load_extension("projects")
-        -- end,
-
         -- opts will be merged with the parent spec
         opts = {
             defaults = {
@@ -73,6 +62,23 @@ return {
                     require("telescope").extensions.live_grep_args.live_grep_args() -- see arguments given in extensions config
                 end,
                 desc = "Live Grep (Args)",
+            },
+            -- change a keymap
+            { "<leader><leader>", "<cmd>Telescope find_files<CR>", desc = "Find Files" },
+            -- add a keymap to browse plugin files
+            {
+                "<leader>fp",
+                function()
+                    require("telescope.builtin").find_files({ cwd = require("lazy.core.config").options.root })
+                end,
+                desc = "Find Plugin File",
+            },
+            {
+                "<C-p>",
+                function()
+                    require("telescope").extensions.projects.projects({ display_type = "full" })
+                end,
+                { noremap = true, desc = "Lookup project" },
             },
         },
     },
