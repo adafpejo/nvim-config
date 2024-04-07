@@ -41,45 +41,16 @@ return {
                     "--trim",
                 },
             },
-            extensions = {
-                fzf = {},
-                live_grep_args = {},
-                projects = {},
-            },
-        },
-        keys = {
-            {
-                "<leader>/",
-                function()
-                    -- https://github.com/nvim-telescope/telescope-live-grep-args.nvim
-                    -- Uses ripgrep args (rg) for live_grep
-                    -- Command examples:
-                    -- -i "Data"  # case insensitive
-                    -- -g "!*.md" # ignore md files
-                    -- -w # whole word
-                    -- -e # regex
-                    -- see 'man rg' for more
-                    require("telescope").extensions.live_grep_args.live_grep_args() -- see arguments given in extensions config
-                end,
-                desc = "Live Grep (Args)",
-            },
-            -- change a keymap
-            { "<leader><leader>", "<cmd>Telescope find_files<CR>", desc = "Find Files" },
-            -- add a keymap to browse plugin files
-            {
-                "<leader>fp",
-                function()
-                    require("telescope.builtin").find_files({ cwd = require("lazy.core.config").options.root })
-                end,
-                desc = "Find Plugin File",
-            },
-            {
-                "<C-p>",
-                function()
-                    require("telescope").extensions.projects.projects({ display_type = "full" })
-                end,
-                { noremap = true, desc = "Lookup project" },
-            },
-        },
-    },
+        })
+
+        telescope.load_extension("fzf")
+
+        -- set keymaps
+        local keymap = vim.keymap -- for conciseness
+
+        keymap.set("n", "<leader><leader>", "<cmd>Telescope find_files<cr>", { desc = "Fuzzy find files in cwd" })
+        keymap.set("n", "<leader>fr", "<cmd>Telescope oldfiles<cr>", { desc = "Fuzzy find recent files" })
+        keymap.set("n", "<leader>fs", "<cmd>Telescope live_grep<cr>", { desc = "Find string in cwd" })
+        keymap.set("n", "<leader>fc", "<cmd>Telescope grep_string<cr>", { desc = "Find string under cursor in cwd" })
+    end,
 }
