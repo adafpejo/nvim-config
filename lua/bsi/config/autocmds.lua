@@ -12,6 +12,11 @@ vim.api.nvim_create_autocmd({ "FileType" }, {
     end,
 })
 
+vim.cmd("hi GitIgnore guifg=#ff0000")
+vim.cmd("hi NvimTreeGitIgnored guifg=#ff0000")
+vim.cmd("hi NvimTreeGitFileIgnoredHL guifg=gray")
+vim.cmd("hi NvimTreeGitFolderIgnoredHL guifg=gray")
+
 -- function _G.set_terminal_keymaps()
 --     local opts = { buffer = 0 }
 --     vim.keymap.set("t", "<esc>", [[<C-\><C-n>]], opts)

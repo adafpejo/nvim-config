@@ -18,6 +18,8 @@ vim.keymap.set("n", "<leader>ct", function()
     vim.cmd("CopilotToggle")
 end, { desc = "Toggle Copilot" })
 
+vim.g.mapleader = " "
+
 -- exit insert mode with jk
 vim.keymap.set("i", "jk", "<ESC>", { noremap = true, silent = true, desc = "<ESC>" })
 
