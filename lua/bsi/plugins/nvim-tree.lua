@@ -29,7 +29,7 @@ return {
                 "n",
                 "<leader>ee",
                 function()
-                    api.tree.toggle()
+                    api.tree.toggle({ find_file = true })
                 end,
                 { desc = "NvimTreeToggle" }
             )

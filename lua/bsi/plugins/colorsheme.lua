@@ -1,43 +1,15 @@
 return {
     {
-        "catppuccin/nvim",
-        name = "catppuccin",
+        "folke/tokyonight.nvim",
+        lazy = false,
         priority = 1000,
-        ---@class CatppuccinOptions
-        opts = {
-            term_colors = true,
-            transparent_background = false,
-            styles = {
-                comments = {},
-                conditionals = {},
-                loops = {},
-                functions = {},
-                keywords = {},
-                strings = {},
-                variables = {},
-                numbers = {},
-                booleans = {},
-                properties = {},
-                types = {},
-            },
-            integrations = {
-                telescope = {
-                    enabled = true,
-                    style = "nvchad",
-                },
-                dropbar = {
-                    enabled = true,
-                    color_mode = true,
-                },
-            },
-        },
+        opts = {},
     },
-
-    -- Configure LazyVim to load gruvbox
+    { "catppuccin/nvim", name = "catppuccin", priority = 1000 },
     {
         "LazyVim/LazyVim",
         opts = {
-            colorscheme = "catppuccin",
+            colorscheme = "tokyonight-night",
         },
     },
 }
