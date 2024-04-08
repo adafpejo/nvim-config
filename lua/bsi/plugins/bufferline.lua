@@ -23,10 +23,9 @@ return {
         always_show_bufferline = true,
         offsets = {
             {
-                filetype = "neo-tree",
-                text = "Neo-tree",
-                highlight = "Directory",
-                text_align = "left",
+                filetype = "NvimTree",
+                text = "File Explorer",
+                text_align = "center",
             },
         },
     },
