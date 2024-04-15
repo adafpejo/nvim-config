@@ -25,8 +25,9 @@ return {
             { "nvim-neotest/neotest-vim-test" },
             { "nvim-neotest/neotest-python" },
             { "rouge8/neotest-rust" },
-            { "nvim-neotest/neotest-go", commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+            { "nvim-neotest/neotest-go",        commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
             { "vim-test/vim-test" },
+            { 'rcasia/neotest-java' },
         },
 
         keys = {
@@ -135,6 +136,10 @@ return {
                         return vim.fn.getcwd()
                     end,
                 },
+                ["rcasia/neotest-java"] = {
+                    junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
+                    ignore_wrapper = false,
+                }
             },
         },
     },
@@ -143,7 +148,7 @@ return {
         "andythigpen/nvim-coverage",
         dependencies = { "nvim-lua/plenary.nvim" },
         keys = {
-            { "<leader>tc", "<cmd>Coverage<cr>", desc = "Coverage in gutter" },
+            { "<leader>tc", "<cmd>Coverage<cr>",                             desc = "Coverage in gutter" },
             { "<leader>tC", "<cmd>CoverageLoad<cr><cmd>CoverageSummary<cr>", desc = "Coverage summary" },
         },
         config = function()
