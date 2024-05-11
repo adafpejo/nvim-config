@@ -137,8 +137,8 @@ return {
                     end,
                 },
                 ["rcasia/neotest-java"] = {
+                    filetypes = { "java", "kotlin" },
                     junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
-                    ignore_wrapper = false,
                 }
             },
         },

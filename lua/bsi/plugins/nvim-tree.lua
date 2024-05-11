@@ -8,6 +8,9 @@ return {
             local api = require('nvim-tree.api');
 
             require('nvim-tree').setup({
+                update_focused_file = {
+                    enable = true
+                },
                 filters = {
                     enable = false
                 },

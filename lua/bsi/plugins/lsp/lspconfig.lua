@@ -166,6 +166,7 @@ return {
 
             -- configure typescript server with plugin
             lspconfig["tsserver"].setup({
+                filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact", "typescript.tsx" },
                 capabilities = capabilities,
                 on_attach = on_attach,
             })
@@ -223,6 +224,17 @@ return {
             lspconfig["pyright"].setup({
                 capabilities = capabilities,
                 on_attach = on_attach,
+            })
+
+            lspconfig["jdtls"].setup({
+                capabilities = capabilities,
+                on_attach = on_attach,
+            })
+
+            lspconfig["kotlin_language_server"].setup({
+                capabilities = capabilities,
+                on_attach = on_attach,
+                filetypes = { "kotlin" }
             })
 
             -- configure lua server (with special settings)

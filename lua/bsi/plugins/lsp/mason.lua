@@ -29,6 +29,9 @@ return {
                 "emmet_ls",
                 "prismals",
                 "pyright",
+                "jdtls",
+                "java_language_server",
+                "kotlin_language_server",
             },
             -- auto-install configured servers (with lspconfig)
             automatic_installation = true, -- not the same as ensure_installed

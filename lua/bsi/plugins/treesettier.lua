@@ -13,6 +13,7 @@ return {
                     "java",
                     "javascript",
                     "json",
+                    "kotlin",
                     "lua",
                     "markdown",
                     "markdown_inline",
