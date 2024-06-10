@@ -42,6 +42,58 @@ vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
 
 vim.keymap.set("n", "<leader>L", "<cmd>Lazy<cr>", { desc = ":Lazy" })
 
+vim.keymap.set("n", "<leader>sw", function()
+    -- Get the word under the cursor
+    local word = vim.fn.expand("<cword>")
+
+    SearchGoogle(word)
+end, { desc = "Search word under cur" })
+
+-- Function to get the visual selection
+local function get_visual_selection()
+    -- Get the start and end positions of the visual selection
+    local start_pos = vim.fn.getpos("'<")
+    local end_pos = vim.fn.getpos("'>")
+
+    -- Get the line numbers and columns
+    local line_start = start_pos[2]
+    local column_start = start_pos[3]
+    local line_end = end_pos[2]
+    local column_end = end_pos[3]
+
+    -- Extract the selected lines
+    local lines = vim.fn.getline(line_start, line_end)
+    if #lines == 0 then return '' end
+
+    -- Adjust the first and last lines to the selection
+    lines[1] = lines[1]:sub(column_start, -1)
+    lines[#lines] = lines[#lines]:sub(1, column_end)
+
+    return table.concat(lines, " ")
+end
+
+-- Function to URL encode a string
+local function url_encode(str)
+    if str then
+        str = str:gsub("\n", " "):gsub("([^%w %-%_%.%~])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+        str = str:gsub(" ", "%%20")
+    end
+    return str
+end
+
+vim.keymap.set("v", "<leader>si", function()
+    -- Get the selected text in visual mode
+    local start_pos = vim.fn.getpos("'<")
+    local end_pos = vim.fn.getpos("'>")
+
+    -- Extract the selected text
+    local lines = get_visual_selection()
+    local encodedlines = url_encode(lines)
+    SearchGoogle(encodedlines)
+end, { desc = "Search selected block" })
+
 -- Unmap mappings used by tmux plugin
 -- TODO(vintharas): There's likely a better way to do this.
 -- vim.keymap.del("n", "<C-h>")
