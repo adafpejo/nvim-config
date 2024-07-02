@@ -27,7 +27,6 @@ return {
                 "lua_ls",
                 "graphql",
                 "emmet_ls",
-                "prismals",
                 "pyright",
                 "jdtls",
                 "java_language_server",

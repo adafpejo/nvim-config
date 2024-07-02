@@ -40,11 +40,13 @@ return {
                     "--column",
                     "--smart-case",
                     "--trim",
+                    "-g",
+                    "!{.git,node_modules}/*"
                 },
             },
             pickers = {
                 find_files = {
-                    find_command = { 'rg', '--files', '--hidden', '-g', '!.git' },
+                    find_command = { 'rg', '--files', '--hidden', '-g', '!{.git,node_modules}/*', '-g', '.*' },
                 },
             }
         },
@@ -64,7 +66,7 @@ return {
                 local timer = vim.loop.new_timer()
 
                 -- timeout to wait telescope result
-                timer:start(50, 0, vim.schedule_wrap(function ()
+                timer:start(50, 0, vim.schedule_wrap(function()
                     vim.cmd('stopinsert')
                 end))
             end, { desc = "Find string in cwd" })

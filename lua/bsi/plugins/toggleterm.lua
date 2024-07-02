@@ -4,9 +4,9 @@ return {
         version = "*",
         opts = {
             direction = "horizontal",
-            open_mapping = [[<c-\>]],
+            open_mapping = [[<c-/>]],
         },
         config = true,
-        enable = false,
     },
+    { 'christoomey/vim-tmux-navigator', }
 }

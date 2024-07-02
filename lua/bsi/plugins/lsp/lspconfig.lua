@@ -35,7 +35,7 @@ return {
         "neovim/nvim-lspconfig",
         event = { "BufReadPre", "BufNewFile" },
         dependencies = {
-            "hrsh7th/cmp-nvim-lsp",
+            "nvimdev/epo.nvim",
             { "antosha417/nvim-lsp-file-operations", config = true },
         },
         config = function()
@@ -49,9 +49,6 @@ return {
                     source = 'always',
                 },
             }, lspconfig_ns)
-
-            -- import cmp-nvim-lsp plugin
-            local cmp_nvim_lsp = require("cmp_nvim_lsp")
 
             local keymap = vim.keymap -- for conciseness
 
@@ -135,7 +132,9 @@ return {
             end
 
             -- used to enable autocompletion (assign to every lsp server config)
-            local capabilities = cmp_nvim_lsp.default_capabilities()
+            local capabilities = vim.tbl_deep_extend('force',
+                vim.lsp.protocol.make_client_capabilities(),
+                require('epo').register_cap())
 
             -- Change the Diagnostic symbols in the sign column (gutter)
             -- (not in youtube nvim video)
@@ -201,10 +200,10 @@ return {
             })
 
             -- configure prisma orm server
-            lspconfig["prismals"].setup({
-                capabilities = capabilities,
-                on_attach = on_attach,
-            })
+            -- lspconfig["prismals"].setup({
+            --     capabilities = capabilities,
+            --     on_attach = on_attach,
+            -- })
 
             -- configure graphql language server
             lspconfig["graphql"].setup({
@@ -230,7 +229,11 @@ return {
                 capabilities = capabilities,
                 on_attach = on_attach,
             })
-
+            lspconfig["jdtls"].setup({
+                capabilities = capabilities,
+                on_attach = on_attach,
+                filetypes = { "java" }
+            })
             lspconfig["kotlin_language_server"].setup({
                 capabilities = capabilities,
                 on_attach = on_attach,

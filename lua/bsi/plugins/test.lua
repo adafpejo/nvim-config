@@ -12,12 +12,16 @@ return {
         "nvim-neotest/neotest",
 
         dependencies = {
-            { "nvim-lua/plenary.nvim" },
-            { "nvim-treesitter/nvim-treesitter" },
-            { "antoinemadec/FixCursorHold.nvim" },
+            -- default an require deps
+            "nvim-neotest/nvim-nio",
+            "nvim-lua/plenary.nvim",
+            "antoinemadec/FixCursorHold.nvim",
+            "nvim-treesitter/nvim-treesitter",
+            ------
+
             { "folke/neodev.nvim" },
 
-            { "haydenmeade/neotest-jest" },
+            -- { "nvim-neotest/neotest-jest" },
             { "marilari88/neotest-vitest" },
             { "thenbe/neotest-playwright" },
 
@@ -25,9 +29,9 @@ return {
             { "nvim-neotest/neotest-vim-test" },
             { "nvim-neotest/neotest-python" },
             { "rouge8/neotest-rust" },
-            { "nvim-neotest/neotest-go",        commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+            { "nvim-neotest/neotest-go",      commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
             { "vim-test/vim-test" },
-            { 'rcasia/neotest-java' },
+            -- { 'rcasia/neotest-java' },
         },
 
         keys = {
@@ -130,8 +134,11 @@ return {
                     ignore_file_types = { "python", "vim", "lua", "rust", "go" },
                 },
                 ["neotest-jest"] = {
-                    filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
-                    jestCommand = "npm test --",
+                    cwd = function()
+                        return vim.fn.getcwd()
+                    end,
+                },
+                ["neotest-vitest"] = {
                     cwd = function()
                         return vim.fn.getcwd()
                     end,

@@ -17,6 +17,10 @@ vim.cmd("hi NvimTreeGitIgnored guifg=#ff0000")
 vim.cmd("hi NvimTreeGitFileIgnoredHL guifg=gray")
 vim.cmd("hi NvimTreeGitFolderIgnoredHL guifg=gray")
 
+for _, group in ipairs(vim.fn.getcompletion("@lsp", "highlight")) do
+    vim.api.nvim_set_hl(0, group, {})
+end
+
 -- function _G.set_terminal_keymaps()
 --     local opts = { buffer = 0 }
 --     vim.keymap.set("t", "<esc>", [[<C-\><C-n>]], opts)

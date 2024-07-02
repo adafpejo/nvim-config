@@ -4,6 +4,8 @@
 
 -- vim.keymap.set("n", "<C-/>", "<cmd>ToggleTermToggleAll<CR>")
 
+vim.g.mapleader = " "
+
 local copilot_on = true
 vim.api.nvim_create_user_command("CopilotToggle", function()
     if copilot_on then
@@ -16,9 +18,11 @@ end, { nargs = 0 })
 
 vim.keymap.set("n", "<leader>ct", function()
     vim.cmd("CopilotToggle")
-end, { desc = "Toggle Copilot" })
+end, { noremap = true, desc = "Toggle Copilot" })
 
-vim.g.mapleader = " "
+vim.keymap.set("n", "<leader>cg", function()
+    vim.cmd("ChatGPT")
+end, { noremap = true, desc = "ChatGpt" })
 
 -- exit insert mode with jk
 vim.keymap.set("i", "jk", "<ESC>", { noremap = true, silent = true, desc = "<ESC>" })
@@ -41,6 +45,9 @@ vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { noremap = true, desc = "Save wi
 vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
 
 vim.keymap.set("n", "<leader>L", "<cmd>Lazy<cr>", { desc = ":Lazy" })
+
+-- Lazygit
+vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
 
 vim.keymap.set("n", "<leader>sw", function()
     -- Get the word under the cursor
@@ -93,6 +100,18 @@ vim.keymap.set("v", "<leader>si", function()
     local encodedlines = url_encode(lines)
     SearchGoogle(encodedlines)
 end, { desc = "Search selected block" })
+
+vim.keymap.set('n', '<D-s>', ':w<CR>', { noremap = true, silent = true })
+-- Map Cmd+S to save in insert mode
+vim.keymap.set('i', '<D-s>', '<Esc>:w<CR>', { noremap = true, silent = true })
+
+-- Create a custom command to reload the init.lua file
+vim.cmd [[
+      command! ReloadConfig lua require('user_config').reload_config()
+    ]]
+
+-- Map Cmd+R to the ReloadConfig command
+-- vim.api.nvim_set_keymap('n', '<D-r>', ':ReloadConfig<CR>', { noremap = true })
 
 -- Unmap mappings used by tmux plugin
 -- TODO(vintharas): There's likely a better way to do this.
