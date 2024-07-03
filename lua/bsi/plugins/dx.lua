@@ -52,6 +52,21 @@ return {
     {
         "tpope/vim-commentary",
     },
+    -- https://devdocs.io fast lookup
+    {
+        "luckasRanarison/nvim-devdocs",
+        dependencies = {
+            "nvim-lua/plenary.nvim",
+            "nvim-telescope/telescope.nvim",
+            "nvim-treesitter/nvim-treesitter",
+        },
+        opts = {
+            ensure_installed = {
+                "react",
+                "typescript",
+            },
+        }
+    },
     {
         "ThePrimeagen/harpoon",
         dependencies = {

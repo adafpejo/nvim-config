@@ -46,6 +46,9 @@ vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
 
 vim.keymap.set("n", "<leader>L", "<cmd>Lazy<cr>", { desc = ":Lazy" })
 
+-- Devdocs
+vim.keymap.set("n", "<leader>dd", "<cmd>DevdocsOpen<cr>", { noremap = true, desc = "Open Devdocs" })
+
 -- Lazygit
 vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
 

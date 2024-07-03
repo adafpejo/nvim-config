@@ -19,19 +19,14 @@ return {
             "nvim-treesitter/nvim-treesitter",
             ------
 
-            { "folke/neodev.nvim" },
-
-            -- { "nvim-neotest/neotest-jest" },
+            { "vim-test/vim-test" },
+            { "nvim-neotest/neotest-jest" },
             { "marilari88/neotest-vitest" },
             { "thenbe/neotest-playwright" },
 
             -- adapters
-            { "nvim-neotest/neotest-vim-test" },
-            { "nvim-neotest/neotest-python" },
-            { "rouge8/neotest-rust" },
             { "nvim-neotest/neotest-go",      commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
-            { "vim-test/vim-test" },
-            -- { 'rcasia/neotest-java' },
+            { 'rcasia/neotest-java' },
         },
 
         keys = {
@@ -100,12 +95,6 @@ return {
 
         opts = {
             adapters = {
-                ["neotest-python"] = {
-                    -- https://github.com/nvim-neotest/neotest-python
-                    runner = "pytest",
-                    args = { "--log-level", "INFO", "--color", "yes", "-vv", "-s" },
-                    -- dap = { justMyCode = false },
-                },
                 ["neotest-go"] = {
                     args = { "-coverprofile=coverage.out" },
                 },
@@ -129,26 +118,61 @@ return {
                 --   -- https://github.com/cargo-bins/cargo-binstall
                 --   -- https://nexte.st/book/pre-built-binaries.html
                 -- },
-                ["neotest-vim-test"] = {
-                    -- https://github.com/nvim-neotest/neotest-vim-test
-                    ignore_file_types = { "python", "vim", "lua", "rust", "go" },
-                },
                 ["neotest-jest"] = {
                     cwd = function()
                         return vim.fn.getcwd()
                     end,
                 },
-                ["neotest-vitest"] = {
-                    cwd = function()
-                        return vim.fn.getcwd()
-                    end,
-                },
-                ["rcasia/neotest-java"] = {
+                ["neotest-vitest"] = {},
+                ["neotest-java"] = {
                     filetypes = { "java", "kotlin" },
                     junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
                 }
             },
         },
+        config = function(_, opts)
+          local neotest_ns = vim.api.nvim_create_namespace("neotest")
+          vim.diagnostic.config({
+            virtual_text = {
+              format = function(diagnostic)
+                -- Replace newline and tab characters with space for more compact diagnostics
+                local message = diagnostic.message:gsub("\n", " "):gsub("\t", " "):gsub("%s+", " "):gsub("^%s+", "")
+                return message
+              end,
+            },
+          }, neotest_ns)
+
+          if opts.adapters then
+            local adapters = {}
+            for name, config in pairs(opts.adapters or {}) do
+              if type(name) == "number" then
+                if type(config) == "string" then
+                  config = require(config)
+                end
+                adapters[#adapters + 1] = config
+              elseif config ~= false then
+                local adapter = require(name)
+                if type(config) == "table" and not vim.tbl_isempty(config) then
+                  local meta = getmetatable(adapter)
+                  if adapter.setup then
+                    adapter.setup(config)
+                  elseif adapter.adapter then
+                    adapter.adapter(config)
+                    adapter = adapter.adapter
+                  elseif meta and meta.__call then
+                    adapter(config)
+                  else
+                    error("Adapter " .. name .. " does not support setup")
+                  end
+                end
+                adapters[#adapters + 1] = adapter
+              end
+            end
+            opts.adapters = adapters
+          end
+
+          require("neotest").setup(opts)
+        end,
     },
 
     {
