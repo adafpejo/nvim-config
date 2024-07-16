@@ -60,12 +60,30 @@ return {
             "nvim-telescope/telescope.nvim",
             "nvim-treesitter/nvim-treesitter",
         },
-        opts = {
-            ensure_installed = {
-                "react",
-                "typescript",
-            },
-        }
+        opts = {}
+        -- opts = {
+        --     ensure_installed = {
+        --         "react",
+        --         "typescript",
+        --         "vite",
+        --         "playwright",
+        --         "html",
+        --         "css",
+        --         "http",
+        --         "dom",
+        --         "bash",
+        --         "docker",
+        --         "eslint",
+        --         "express",
+        --         "esbuild",
+        --         "git",
+        --         "go",
+        --         "jest",
+        --         "vitest",
+        --         "nginx",
+        --         "node"
+        --     },
+        -- }
     },
     {
         "ThePrimeagen/harpoon",

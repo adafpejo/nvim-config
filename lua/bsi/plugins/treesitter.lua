@@ -18,7 +18,7 @@ return {
 
             configs.setup({
                 ensure_installed = "all",
-                highlight = { enable = true, additional_vim_regex_highlighting = false },
+                highlight = { enable = true },
                 indent = { enable = true },
                 autotag = { enable = true, enable_close_on_slash = false },
             })

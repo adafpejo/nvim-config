@@ -45,12 +45,27 @@ vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { noremap = true, desc = "Save wi
 vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
 
 vim.keymap.set("n", "<leader>L", "<cmd>Lazy<cr>", { desc = ":Lazy" })
+vim.keymap.set("n", "<leader>vd", "<cmd>noh<cr>", { desc = "Remove visual" })
 
 -- Devdocs
 vim.keymap.set("n", "<leader>dd", "<cmd>DevdocsOpen<cr>", { noremap = true, desc = "Open Devdocs" })
 
 -- Lazygit
 vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
+
+-- Spectrume
+vim.keymap.set('n', '<leader>S', '<cmd>lua require("spectre").toggle()<CR>', {
+    desc = "Toggle Spectre"
+})
+vim.keymap.set('n', '<leader>sw', '<cmd>lua require("spectre").open_visual({select_word=true})<CR>', {
+    desc = "Search current word"
+})
+vim.keymap.set('v', '<leader>sw', '<esc><cmd>lua require("spectre").open_visual()<CR>', {
+    desc = "Search current word"
+})
+vim.keymap.set('n', '<leader>sp', '<cmd>lua require("spectre").open_file_search({select_word=true})<CR>', {
+    desc = "Search on current file"
+})
 
 vim.keymap.set("n", "<leader>sw", function()
     -- Get the word under the cursor

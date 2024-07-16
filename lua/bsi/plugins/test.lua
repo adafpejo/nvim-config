@@ -25,7 +25,7 @@ return {
             { "thenbe/neotest-playwright" },
 
             -- adapters
-            { "nvim-neotest/neotest-go",      commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+            { "nvim-neotest/neotest-go",  commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
             { 'rcasia/neotest-java' },
         },
 
@@ -39,6 +39,13 @@ return {
                 "<leader>tt",
                 function()
                     require("neotest").run.run(vim.fn.expand("%"))
+                end,
+                desc = "Run File",
+            },
+            {
+                "<leader>tu",
+                function()
+                    require("neotest").run.run({ path = vim.fn.expand("%"), extra_args = { "-u" } })
                 end,
                 desc = "Run File",
             },
@@ -123,7 +130,8 @@ return {
                         return vim.fn.getcwd()
                     end,
                 },
-                ["neotest-vitest"] = {},
+                ["neotest-vitest"] = {
+                },
                 ["neotest-java"] = {
                     filetypes = { "java", "kotlin" },
                     junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
@@ -131,47 +139,48 @@ return {
             },
         },
         config = function(_, opts)
-          local neotest_ns = vim.api.nvim_create_namespace("neotest")
-          vim.diagnostic.config({
-            virtual_text = {
-              format = function(diagnostic)
-                -- Replace newline and tab characters with space for more compact diagnostics
-                local message = diagnostic.message:gsub("\n", " "):gsub("\t", " "):gsub("%s+", " "):gsub("^%s+", "")
-                return message
-              end,
-            },
-          }, neotest_ns)
+            local neotest_ns = vim.api.nvim_create_namespace("neotest")
+            vim.diagnostic.config({
+                virtual_text = {
+                    format = function(diagnostic)
+                        -- Replace newline and tab characters with space for more compact diagnostics
+                        local message = diagnostic.message:gsub("\n", " "):gsub("\t", " "):gsub("%s+", " "):gsub("^%s+",
+                            "")
+                        return message
+                    end,
+                },
+            }, neotest_ns)
 
-          if opts.adapters then
-            local adapters = {}
-            for name, config in pairs(opts.adapters or {}) do
-              if type(name) == "number" then
-                if type(config) == "string" then
-                  config = require(config)
+            if opts.adapters then
+                local adapters = {}
+                for name, config in pairs(opts.adapters or {}) do
+                    if type(name) == "number" then
+                        if type(config) == "string" then
+                            config = require(config)
+                        end
+                        adapters[#adapters + 1] = config
+                    elseif config ~= false then
+                        local adapter = require(name)
+                        if type(config) == "table" and not vim.tbl_isempty(config) then
+                            local meta = getmetatable(adapter)
+                            if adapter.setup then
+                                adapter.setup(config)
+                            elseif adapter.adapter then
+                                adapter.adapter(config)
+                                adapter = adapter.adapter
+                            elseif meta and meta.__call then
+                                adapter(config)
+                            else
+                                error("Adapter " .. name .. " does not support setup")
+                            end
+                        end
+                        adapters[#adapters + 1] = adapter
+                    end
                 end
-                adapters[#adapters + 1] = config
-              elseif config ~= false then
-                local adapter = require(name)
-                if type(config) == "table" and not vim.tbl_isempty(config) then
-                  local meta = getmetatable(adapter)
-                  if adapter.setup then
-                    adapter.setup(config)
-                  elseif adapter.adapter then
-                    adapter.adapter(config)
-                    adapter = adapter.adapter
-                  elseif meta and meta.__call then
-                    adapter(config)
-                  else
-                    error("Adapter " .. name .. " does not support setup")
-                  end
-                end
-                adapters[#adapters + 1] = adapter
-              end
+                opts.adapters = adapters
             end
-            opts.adapters = adapters
-          end
 
-          require("neotest").setup(opts)
+            require("neotest").setup(opts)
         end,
     },
 
@@ -185,6 +194,11 @@ return {
         config = function()
             require("coverage").setup({
                 auto_reload = true,
+                lang = {
+                    javascript = {
+                        coverage_file = '.coverage/lcov.info'
+                    }
+                }
             })
         end,
     },

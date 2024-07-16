@@ -1,4 +1,6 @@
 return {
+    { 'nvim-pack/nvim-spectre' },
+    { 'onsails/lspkind.nvim', },
     { "rcarriga/nvim-notify" },
     {
         "kdheepak/lazygit.nvim",
