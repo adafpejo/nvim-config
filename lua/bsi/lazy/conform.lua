@@ -1,16 +1,9 @@
 return {
     {
         "stevearc/conform.nvim",
-        config = function ()
-            require('conform').setup({
-                -- formatters = {
-                    -- Defining Prettier as a formatter
-                    -- prettier = {
-                    --     command = "prettier",                                                                -- Ensure Prettier is installed and accessible
-                    --     args = { "--config", "~/.config/nvim/.prettierrc", "--stdin-filepath", "$FILENAME" }, -- Path to your default Prettier config
-                    --     root_markers = { ".git" },                                                           -- Determines project root; can adjust as needed
-                    -- },
-                -- },
+        config = function()
+            require("conform").setup({
+                notify_on_error = false,
                 formatters_by_ft = {
                     ["lua"] = { "stylua" },
                     ["javascript"] = { "eslint_d", "prettierd" },
@@ -24,20 +17,30 @@ return {
                     ["html"] = { "prettierd" },
                     ["json"] = { "prettierd" },
                     ["jsonc"] = { "prettierd" },
-                    ["yaml"] = { "prettierd" },
                     ["markdown"] = { "prettierd" },
                     ["markdown.mdx"] = { "prettierd" },
                     ["graphql"] = { "prettierd" },
                     ["handlebars"] = { "prettierd" },
+                    -- Use the "*" filetype to run formatters on all filetypes.
+                    ["*"] = { "codespell" },
                 },
             })
 
+            local augroup = vim.api.nvim_create_augroup("LspFormatting", {})
             vim.api.nvim_create_autocmd("BufWritePre", {
-              pattern = "*",
-              callback = function(args)
-                require("conform").format({ bufnr = args.buf })
-              end,
+                pattern = "*",
+                group = augroup,
+                callback = function(args)
+                    require("conform").format({ bufnr = args.buf })
+                end,
             })
-        end
+            vim.api.nvim_create_autocmd("BufWritePre", {
+                pattern = { "*.js", "*.ts", "*.tsx", "*.jsx" },
+                group = augroup,
+                callback = function()
+                    vim.cmd("silent! EslintFixAll")
+                end,
+            })
+        end,
     },
 }

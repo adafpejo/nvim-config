@@ -1,3 +1,7 @@
+require("bsi.set")
+require("bsi.remap")
+require("bsi.lazy_init")
+
 -- Autocmds are automatically loaded on the VeryLazy event
 -- Default autocmds that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/autocmds.lua
 -- Add any additional autocmds here
@@ -8,27 +12,27 @@ end
 
 local autocmd = vim.api.nvim_create_autocmd
 
-local bsiGroup = augroup('bsi');
+local bsiGroup = augroup("bsi")
 
-autocmd({ "FileType" }, {
-    pattern = { "json", "jsonc", "json5", "markdown" },
-    callback = function()
-        vim.wo.conceallevel = 0
-        vim.opt_local.tabstop = 2
-        vim.opt_local.softtabstop = 2
-        vim.opt_local.shiftwidth = 2
-    end,
-})
+-- autocmd({ "FileType" }, {
+--     pattern = { "json", "jsonc", "json5", "markdown" },
+--     callback = function()
+--         vim.wo.conceallevel = 0
+--         vim.opt_local.tabstop = 2
+--         vim.opt_local.softtabstop = 2
+--         vim.opt_local.shiftwidth = 2
+--     end,
+-- })
 
-local coverageLoadCallback = function()
-    require('coverage').load();
-    vim.cmd('CoverageShow');
-end
-autocmd({ "BufEnter", "FileType" }, {
-    group = augroup("coverage"),
-    pattern = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
-    callback = coverageLoadCallback
-})
+-- local coverageLoadCallback = function()
+--     require("coverage").load()
+--     vim.cmd("CoverageShow")
+-- end
+-- autocmd({ "BufEnter", "FileType" }, {
+--     group = augroup("coverage"),
+--     pattern = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
+--     callback = coverageLoadCallback,
+-- })
 
 -- Highlight on yank
 autocmd("TextYankPost", {
@@ -36,6 +40,12 @@ autocmd("TextYankPost", {
     callback = function()
         vim.highlight.on_yank()
     end,
+})
+
+autocmd("BufWritePost", {
+    group = bsiGroup,
+    pattern = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
+    command = "silent! EslintFixAll",
 })
 
 -- close some filetypes with <q>
@@ -56,10 +66,12 @@ autocmd("FileType", {
         "neotest-output-panel",
         "dbout",
         "gitsigns.blame",
+        "lazygit",
     },
     callback = function(event)
         vim.bo[event.buf].buflisted = false
         vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = event.buf, silent = true })
+        vim.keymap.set("t", "<Esc>", "<cmd>close<cr>", { buffer = event.buf, silent = true })
     end,
 })
 
@@ -73,7 +85,7 @@ for _, group in ipairs(vim.fn.getcompletion("@lsp", "highlight")) do
 end
 
 local keymap = vim.keymap -- for conciseness
-autocmd('LspAttach', {
+autocmd("LspAttach", {
     group = bsiGroup,
     callback = function(e)
         local opts = { noremap = true, silent = true, buffer = e.buf }
@@ -101,7 +113,7 @@ autocmd('LspAttach', {
         opts.desc = "See available code actions"
         keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, opts) -- see available code actions, in visual mode will apply to selection
 
-        opts.desc = 'See all current buf actions'
+        opts.desc = "See all current buf actions"
         keymap.set("n", "<leader>cA", function()
             vim.lsp.buf.code_action({
                 context = {
@@ -139,6 +151,5 @@ autocmd('LspAttach', {
 
         opts.desc = "Restart LSP"
         keymap.set("n", "<leader>rs", ":LspRestart<CR>", opts)
-    end
+    end,
 })
-

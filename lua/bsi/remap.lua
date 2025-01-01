@@ -1,3 +1,5 @@
+local utils = require("bsi.utils")
+
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
 -- Add any additional keymaps here
@@ -5,6 +7,7 @@
 -- vim.keymap.set("n", "<C-/>", "<cmd>ToggleTermToggleAll<CR>")
 
 vim.g.mapleader = " "
+vim.g.maplocalleader = ","
 
 local copilot_on = true
 vim.api.nvim_create_user_command("CopilotToggle", function()
@@ -27,6 +30,9 @@ end, { noremap = true, desc = "ChatGpt" })
 -- exit insert mode with jk
 vim.keymap.set("i", "jk", "<ESC>", { noremap = true, silent = true, desc = "<ESC>" })
 
+vim.keymap.set({ "n" }, "H", "^", { noremap = true, desc = "First non-blank" })
+vim.keymap.set({ "n" }, "L", "g_", { noremap = true, desc = "Last non-blank" })
+
 -- Perusing code faster with K and J
 vim.keymap.set({ "n", "v" }, "K", "5k", { noremap = true, desc = "Up faster" })
 vim.keymap.set({ "n", "v" }, "J", "5j", { noremap = true, desc = "Down faster" })
@@ -40,6 +46,9 @@ vim.keymap.set("n", "<C-P>", "<leader>ff")
 
 -- Save file
 vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { noremap = true, desc = "Save window" })
+vim.api.nvim_create_user_command("W", function(opts)
+    vim.cmd("w " .. opts.args)
+end, { nargs = "*" })
 
 -- Quike exit
 vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
@@ -53,25 +62,32 @@ vim.keymap.set("n", "<leader>dd", "<cmd>DevdocsOpen<cr>", { noremap = true, desc
 -- Lazygit
 vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
 
+-- Gen.nvim
+vim.keymap.set({ "n", "v" }, "<leader>]", ":Gen<CR>")
+
+-- Webify
+vim.keymap.set("n", "<leader>o", "<cmd>OpenFileInRepo<cr>", { desc = "Open in web browser" })
+vim.keymap.set("n", "<leader>O", "<cmd>OpenLineInRepo<cr>", { desc = "Open in web browser, including current line" })
+
 -- Spectrume
-vim.keymap.set('n', '<leader>S', '<cmd>lua require("spectre").toggle()<CR>', {
-    desc = "Toggle Spectre"
+vim.keymap.set("n", "<leader>S", '<cmd>lua require("spectre").toggle()<CR>', {
+    desc = "Toggle Spectre",
 })
-vim.keymap.set('n', '<leader>sw', '<cmd>lua require("spectre").open_visual({select_word=true})<CR>', {
-    desc = "Search current word"
+vim.keymap.set("n", "<leader>sw", '<cmd>lua require("spectre").open_visual({select_word=true})<CR>', {
+    desc = "Search current word",
 })
-vim.keymap.set('v', '<leader>sw', '<esc><cmd>lua require("spectre").open_visual()<CR>', {
-    desc = "Search current word"
+vim.keymap.set("v", "<leader>sw", '<esc><cmd>lua require("spectre").open_visual()<CR>', {
+    desc = "Search current word",
 })
-vim.keymap.set('n', '<leader>sp', '<cmd>lua require("spectre").open_file_search({select_word=true})<CR>', {
-    desc = "Search on current file"
+vim.keymap.set("n", "<leader>sp", '<cmd>lua require("spectre").open_file_search({select_word=true})<CR>', {
+    desc = "Search on current file",
 })
 
 vim.keymap.set("n", "<leader>sw", function()
     -- Get the word under the cursor
     local word = vim.fn.expand("<cword>")
 
-    SearchGoogle(word)
+    utils.search_google(word)
 end, { desc = "Search word under cur" })
 
 -- Function to get the visual selection
@@ -88,7 +104,9 @@ local function get_visual_selection()
 
     -- Extract the selected lines
     local lines = vim.fn.getline(line_start, line_end)
-    if #lines == 0 then return '' end
+    if #lines == 0 then
+        return ""
+    end
 
     -- Adjust the first and last lines to the selection
     lines[1] = lines[1]:sub(column_start, -1)
@@ -116,17 +134,17 @@ vim.keymap.set("v", "<leader>si", function()
     -- Extract the selected text
     local lines = get_visual_selection()
     local encodedlines = url_encode(lines)
-    SearchGoogle(encodedlines)
+    utils.search_google(encodedlines)
 end, { desc = "Search selected block" })
 
-vim.keymap.set('n', '<D-s>', ':w<CR>', { noremap = true, silent = true })
+vim.keymap.set("n", "<D-s>", ":w<CR>", { noremap = true, silent = true })
 -- Map Cmd+S to save in insert mode
-vim.keymap.set('i', '<D-s>', '<Esc>:w<CR>', { noremap = true, silent = true })
+vim.keymap.set("i", "<D-s>", "<Esc>:w<CR>", { noremap = true, silent = true })
 
 -- Create a custom command to reload the init.lua file
-vim.cmd [[
+vim.cmd([[
       command! ReloadConfig lua require('user_config').reload_config()
-    ]]
+    ]])
 
 -- Map Cmd+R to the ReloadConfig command
 -- vim.api.nvim_set_keymap('n', '<D-r>', ':ReloadConfig<CR>', { noremap = true })

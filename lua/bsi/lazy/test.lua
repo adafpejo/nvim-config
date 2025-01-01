@@ -1,14 +1,5 @@
 return {
     {
-        "folke/which-key.nvim",
-        optional = true,
-        opts = {
-            defaults = {
-                ["<leader>t"] = { name = "+test" },
-            },
-        },
-    },
-    {
         "nvim-neotest/neotest",
 
         dependencies = {
@@ -25,8 +16,8 @@ return {
             { "thenbe/neotest-playwright" },
 
             -- adapters
-            { "nvim-neotest/neotest-go",  commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
-            { 'rcasia/neotest-java' },
+            { "nvim-neotest/neotest-go", commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+            { "rcasia/neotest-java" },
         },
 
         keys = {
@@ -107,7 +98,8 @@ return {
                 },
                 ["neotest-playwright"] = {
                     options = {
-                        preset = "headed",
+                        preset = "none",
+                        persist_project_selection = false,
                         enable_dynamic_test_discovery = true,
                         get_playwright_binary = function()
                             return vim.loop.cwd() + "/node_modules/.bin/playwright"
@@ -130,12 +122,11 @@ return {
                         return vim.fn.getcwd()
                     end,
                 },
-                ["neotest-vitest"] = {
-                },
+                ["neotest-vitest"] = {},
                 ["neotest-java"] = {
                     filetypes = { "java", "kotlin" },
                     junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
-                }
+                },
             },
         },
         config = function(_, opts)
@@ -144,8 +135,8 @@ return {
                 virtual_text = {
                     format = function(diagnostic)
                         -- Replace newline and tab characters with space for more compact diagnostics
-                        local message = diagnostic.message:gsub("\n", " "):gsub("\t", " "):gsub("%s+", " "):gsub("^%s+",
-                            "")
+                        local message =
+                            diagnostic.message:gsub("\n", " "):gsub("\t", " "):gsub("%s+", " "):gsub("^%s+", "")
                         return message
                     end,
                 },
@@ -188,7 +179,7 @@ return {
         "andythigpen/nvim-coverage",
         dependencies = { "nvim-lua/plenary.nvim" },
         keys = {
-            { "<leader>tc", "<cmd>Coverage<cr>",                             desc = "Coverage in gutter" },
+            { "<leader>tc", "<cmd>Coverage<cr>", desc = "Coverage in gutter" },
             { "<leader>tC", "<cmd>CoverageLoad<cr><cmd>CoverageSummary<cr>", desc = "Coverage summary" },
         },
         config = function()
@@ -196,9 +187,9 @@ return {
                 auto_reload = true,
                 lang = {
                     javascript = {
-                        coverage_file = '.coverage/lcov.info'
-                    }
-                }
+                        coverage_file = ".coverage/lcov.info",
+                    },
+                },
             })
         end,
     },
