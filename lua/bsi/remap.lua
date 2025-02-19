@@ -1,4 +1,9 @@
-local utils = require("bsi.utils")
+local dx = require("bsi.dx")
+local refactoring = require("bsi.refactoring")
+local nvim = require("bsi.utils.nvim")
+local ai = require("bsi.ai")
+local nvim_tree_api = require("nvim-tree.api")
+local webify        = require("bsi.webify")
 
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
@@ -6,29 +11,20 @@ local utils = require("bsi.utils")
 
 -- vim.keymap.set("n", "<C-/>", "<cmd>ToggleTermToggleAll<CR>")
 
-vim.g.mapleader = " "
-vim.g.maplocalleader = ","
-
-local copilot_on = true
-vim.api.nvim_create_user_command("CopilotToggle", function()
-    if copilot_on then
-        vim.cmd("Copilot disable")
-    else
-        vim.cmd("Copilot enable")
-    end
-    copilot_on = not copilot_on
-end, { nargs = 0 })
-
-vim.keymap.set("n", "<leader>ct", function()
-    vim.cmd("CopilotToggle")
-end, { noremap = true, desc = "Toggle Copilot" })
-
-vim.keymap.set("n", "<leader>cg", function()
-    vim.cmd("ChatGPT")
-end, { noremap = true, desc = "ChatGpt" })
-
 -- exit insert mode with jk
 vim.keymap.set("i", "jk", "<ESC>", { noremap = true, silent = true, desc = "<ESC>" })
+
+-- files navigation
+vim.keymap.set({ "n" }, "<C-j>", function()
+    vim.cmd("TmuxNavigateLeft")
+    nvim.move_cursor_down()
+    nvim_tree_api.node.open.edit()
+end, { noremap = true, desc = "Open next file" })
+vim.keymap.set({ "n" }, "<C-k>", function()
+    vim.cmd("TmuxNavigateLeft")
+    nvim.move_cursor_up()
+    nvim_tree_api.node.open.edit()
+end, { noremap = true, desc = "Open prev file" })
 
 vim.keymap.set({ "n" }, "H", "^", { noremap = true, desc = "First non-blank" })
 vim.keymap.set({ "n" }, "L", "g_", { noremap = true, desc = "Last non-blank" })
@@ -37,27 +33,53 @@ vim.keymap.set({ "n" }, "L", "g_", { noremap = true, desc = "Last non-blank" })
 vim.keymap.set({ "n", "v" }, "K", "5k", { noremap = true, desc = "Up faster" })
 vim.keymap.set({ "n", "v" }, "J", "5j", { noremap = true, desc = "Down faster" })
 
+vim.keymap.set({ "v" }, "<", "<gv", { noremap = true, desc = "Remap to save selected" })
+vim.keymap.set({ "v" }, ">", ">gv", { noremap = true, desc = "Remap to save selected" })
+
+vim.keymap.set('n', '<leader>fh', '<cmd>Telescope help_tags<cr>', { noremap = true, silent = true })
+
+vim.keymap.set({ "v" }, "<leader>f", refactoring.format_markdown_150, { noremap = true });
+
 -- Remap K and J
 vim.keymap.set({ "n", "v" }, "<leader>k", "K", { noremap = true, desc = "Keyword" })
 vim.keymap.set({ "n", "v" }, "<leader>j", "J", { noremap = true, desc = "Join lines" })
 
--- C-P classic
-vim.keymap.set("n", "<C-P>", "<leader>ff")
+-- format buf
+vim.keymap.set("n", "<leader>f", vim.lsp.buf.format, { noremap = true, silent = true })
 
 -- Save file
 vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { noremap = true, desc = "Save window" })
 vim.api.nvim_create_user_command("W", function(opts)
     vim.cmd("w " .. opts.args)
 end, { nargs = "*" })
+vim.api.nvim_create_user_command("Msg", function(opts)
+    vim.cmd("messages " .. opts.args)
+end, { nargs = "*" })
 
 -- Quike exit
 vim.keymap.set("n", "<leader>qq", "<cmd>qa<cr>", { desc = "Quike quite" })
 
 vim.keymap.set("n", "<leader>L", "<cmd>Lazy<cr>", { desc = ":Lazy" })
-vim.keymap.set("n", "<leader>vd", "<cmd>noh<cr>", { desc = "Remove visual" })
+vim.keymap.set("n", "<leader>vd", nvim.clear_hightlights, { desc = "Remove visual" })
 
--- Devdocs
-vim.keymap.set("n", "<leader>dd", "<cmd>DevdocsOpen<cr>", { noremap = true, desc = "Open Devdocs" })
+-- lsp shortcut
+vim.keymap.set("n", "<leader>ci", "<cmd>LspInfo<cr>", { desc = ":Lazy" })
+vim.keymap.set("n", "<leader>cl", "<cmd>LspLog<cr>", { desc = ":Lazy" })
+vim.keymap.set("n", "<leader>cr", "<cmd>LspRestart<cr>", { desc = ":Lazy" })
+
+-- llm shortcut
+vim.keymap.set("v", "<leader>ls", function()
+   ai.ask_english()
+end, { noremap = true, desc = ":Lazy" })
+vim.keymap.set("v", "<leader>lc", function()
+    ai.ask_coder()
+end, { noremap = true, desc = ":Lazy" })
+vim.keymap.set("n", "<leader>la", function()
+   ai.ask()
+end, { noremap = true, desc = ":Lazy" })
+vim.keymap.set("v", "<leader>la", function()
+    ai.ask_v()
+end, { noremap = true, desc = ":Lazy" })
 
 -- Lazygit
 vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
@@ -65,9 +87,17 @@ vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "
 -- Gen.nvim
 vim.keymap.set({ "n", "v" }, "<leader>]", ":Gen<CR>")
 
+-- bsi motions
+vim.keymap.set({ "n" }, "<leader>h", dx.highlight_cursor_word, { noremap = true, desc = "Search word in current buffer" })
+vim.keymap.set({ "v" }, "<leader>h", dx.highlight_visual, { noremap = true, desc = "Search word in current buffer" })
+
 -- Webify
-vim.keymap.set("n", "<leader>o", "<cmd>OpenFileInRepo<cr>", { desc = "Open in web browser" })
-vim.keymap.set("n", "<leader>O", "<cmd>OpenLineInRepo<cr>", { desc = "Open in web browser, including current line" })
+vim.keymap.set("n", "<leader>o", function()
+    webify.open_file_in_browser()
+end, { desc = "Open in web browser" })
+vim.keymap.set("n", "<leader>O", function()
+    webify.open_line_in_browser()
+end, { desc = "Open in web browser, including current line" })
 
 -- Spectrume
 vim.keymap.set("n", "<leader>S", '<cmd>lua require("spectre").toggle()<CR>', {
@@ -84,36 +114,9 @@ vim.keymap.set("n", "<leader>sp", '<cmd>lua require("spectre").open_file_search(
 })
 
 vim.keymap.set("n", "<leader>sw", function()
-    -- Get the word under the cursor
-    local word = vim.fn.expand("<cword>")
-
-    utils.search_google(word)
+    local word = nvim.get_cursor_word()
+    dx.search_google(word)
 end, { desc = "Search word under cur" })
-
--- Function to get the visual selection
-local function get_visual_selection()
-    -- Get the start and end positions of the visual selection
-    local start_pos = vim.fn.getpos("'<")
-    local end_pos = vim.fn.getpos("'>")
-
-    -- Get the line numbers and columns
-    local line_start = start_pos[2]
-    local column_start = start_pos[3]
-    local line_end = end_pos[2]
-    local column_end = end_pos[3]
-
-    -- Extract the selected lines
-    local lines = vim.fn.getline(line_start, line_end)
-    if #lines == 0 then
-        return ""
-    end
-
-    -- Adjust the first and last lines to the selection
-    lines[1] = lines[1]:sub(column_start, -1)
-    lines[#lines] = lines[#lines]:sub(1, column_end)
-
-    return table.concat(lines, " ")
-end
 
 -- Function to URL encode a string
 local function url_encode(str)
@@ -127,14 +130,9 @@ local function url_encode(str)
 end
 
 vim.keymap.set("v", "<leader>si", function()
-    -- Get the selected text in visual mode
-    local start_pos = vim.fn.getpos("'<")
-    local end_pos = vim.fn.getpos("'>")
-
-    -- Extract the selected text
-    local lines = get_visual_selection()
+    local lines = nvim.get_visual_selection()
     local encodedlines = url_encode(lines)
-    utils.search_google(encodedlines)
+    dx.search_google(encodedlines)
 end, { desc = "Search selected block" })
 
 vim.keymap.set("n", "<D-s>", ":w<CR>", { noremap = true, silent = true })

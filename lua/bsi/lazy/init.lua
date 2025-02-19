@@ -1,13 +1,11 @@
 return {
     "nvim-lua/plenary.nvim", -- lua functions that many plugins use
-
     "christoomey/vim-tmux-navigator", -- tmux & split window navigation
+    "MunifTanjim/nui.nvim",
+    'sfenzke/http-client.nvim'
 
-    "inkarkat/vim-ReplaceWithRegister", -- replace with register contents using motion (gr + motion)
-    { "echasnovski/mini.nvim", version = "*" },
-    { "natecraddock/sessions.nvim" },
     -- render images
-    { "3rd/image.nvim", opts = { backend = "kitty" } },
+    -- { "3rd/image.nvim", build = false, opts = { backend = "kitty" } },
 
     -- TODO: code actions should be on bottom
     -- {

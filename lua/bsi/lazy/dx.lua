@@ -5,7 +5,6 @@ return {
             { "<leader>z", "<cmd>Zen<CR>", { desc = "Zen mod" } },
         },
     },
-    { "David-Kunz/gen.nvim" },
     {
         "rmagatti/auto-session",
         lazy = false,
@@ -38,39 +37,6 @@ return {
     {
         "tpope/vim-commentary",
     },
-    -- https://devdocs.io fast lookup
-    {
-        "luckasRanarison/nvim-devdocs",
-        dependencies = {
-            "nvim-lua/plenary.nvim",
-            "nvim-telescope/telescope.nvim",
-            "nvim-treesitter/nvim-treesitter",
-        },
-        opts = {},
-        -- opts = {
-        --     ensure_installed = {
-        --         "react",
-        --         "typescript",
-        --         "vite",
-        --         "playwright",
-        --         "html",
-        --         "css",
-        --         "http",
-        --         "dom",
-        --         "bash",
-        --         "docker",
-        --         "eslint",
-        --         "express",
-        --         "esbuild",
-        --         "git",
-        --         "go",
-        --         "jest",
-        --         "vitest",
-        --         "nginx",
-        --         "node"
-        --     },
-        -- }
-    },
     {
         "ThePrimeagen/harpoon",
         dependencies = {
@@ -87,14 +53,15 @@ return {
             { "<leader>ht", ":lua require('harpoon.term').gotoTerminal(1)<CR>", desc = "Terminal" },
         },
     },
+    -- replace all as vscode
     {
-    'MagicDuck/grug-far.nvim',
-    config = function()
-      require('grug-far').setup({
-        -- options, see Configuration section below
-        -- there are no required options atm
-        -- engine = 'ripgrep' is default, but 'astgrep' can be specified
-      });
-    end
-  },
+        "MagicDuck/grug-far.nvim",
+        config = function()
+            require("grug-far").setup({
+                -- options, see Configuration section below
+                -- there are no required options atm
+                -- engine = 'ripgrep' is default, but 'astgrep' can be specified
+            })
+        end,
+    },
 }

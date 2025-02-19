@@ -1,31 +1,32 @@
-return {
-    has_value = function(table, val)
-        for _, value in ipairs(table) do
-            if value == val then
-                return true
-            end
+local M = {}
+
+function M.has_value(table, val)
+    for _, value in ipairs(table) do
+        if value == val then
+            return true
         end
-        return false
-    end,
-	search_google = function(text)
-	    -- URL encode the selected text for safe inclusion in a URL
-	    local encoded_text = text:gsub(" ", "%%20")
+    end
+    return false
+end
 
-	    -- Define the search URL (using Google search)
-	    local search_url = "https://www.google.com/search?q=" .. encoded_text
+--- @param t table
+--- @return table
+function M.table_keys(t)
+    local result_table = {}
+    for i, k in ipairs(t) do
+        result_table[i] = k
+    end
+    return result_table
+end
 
-	    -- Execute the command to open the default web browser with the search URL
-	    local open_command
-	    if vim.fn.has('macunix') == 1 then
-		open_command = "open '" .. search_url .. "'"
-	    elseif vim.fn.has('unix') == 1 then
-		open_command = "xdg-open '" .. search_url .. "'"
-	    elseif vim.fn.has('win32') == 1 then
-		open_command = "start '" .. search_url .. "'"
-	    else
-		print("Unsupported OS")
-		return
-	    end
-	    os.execute(open_command)
-	end
-}
+--- @param t table
+--- @return table
+function M.table_values(t)
+    local result_table = {}
+    for i, k in ipairs(t) do
+        result_table[i] = t[k]
+    end
+    return result_table
+end
+
+return M

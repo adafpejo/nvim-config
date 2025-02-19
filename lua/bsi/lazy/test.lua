@@ -13,10 +13,11 @@ return {
             { "vim-test/vim-test" },
             { "nvim-neotest/neotest-jest" },
             { "marilari88/neotest-vitest" },
+            { "HiPhish/neotest-busted" },
             { "thenbe/neotest-playwright" },
 
             -- adapters
-            { "nvim-neotest/neotest-go", commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+            { "nvim-neotest/neotest-go",  commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
             { "rcasia/neotest-java" },
         },
 
@@ -96,19 +97,19 @@ return {
                 ["neotest-go"] = {
                     args = { "-coverprofile=coverage.out" },
                 },
-                ["neotest-playwright"] = {
-                    options = {
-                        preset = "none",
-                        persist_project_selection = false,
-                        enable_dynamic_test_discovery = true,
-                        get_playwright_binary = function()
-                            return vim.loop.cwd() + "/node_modules/.bin/playwright"
-                        end,
-                        get_playwright_config = function()
-                            return vim.loop.cwd() + "/playwright.config.ts"
-                        end,
-                    },
-                },
+                -- ["neotest-playwright"] = {
+                --     options = {
+                --         preset = "none",
+                --         persist_project_selection = false,
+                --         enable_dynamic_test_discovery = true,
+                --         get_playwright_binary = function()
+                --             return vim.loop.cwd() + "/node_modules/.bin/playwright"
+                --         end,
+                --         get_playwright_config = function()
+                --             return vim.loop.cwd() + "/playwright.config.ts"
+                --         end,
+                --     },
+                -- },
                 -- ["neotest-rust"] = {
                 --   -- see lazy.lua
                 --   -- https://github.com/rouge8/neotest-rust
@@ -172,6 +173,9 @@ return {
             end
 
             require("neotest").setup(opts)
+            -- require("neotest-busted").setup({
+            --     pattern = "_test",
+            -- })
         end,
     },
 
@@ -179,7 +183,7 @@ return {
         "andythigpen/nvim-coverage",
         dependencies = { "nvim-lua/plenary.nvim" },
         keys = {
-            { "<leader>tc", "<cmd>Coverage<cr>", desc = "Coverage in gutter" },
+            { "<leader>tc", "<cmd>Coverage<cr>",                             desc = "Coverage in gutter" },
             { "<leader>tC", "<cmd>CoverageLoad<cr><cmd>CoverageSummary<cr>", desc = "Coverage summary" },
         },
         config = function()

@@ -1,3 +1,5 @@
+local nvim = require('bsi.utils.nvim')
+
 return {
     -- change telescope config
     {
@@ -69,8 +71,9 @@ return {
             keymap.set("n", "<leader><leader>", "<cmd>Telescope find_files<cr>", { desc = "Fuzzy find files in cwd" })
             keymap.set("n", "<leader>fr", "<cmd>Telescope oldfiles<cr>", { desc = "Fuzzy find recent files" })
             keymap.set("n", "<leader>fs", "<cmd>Telescope live_grep<cr>", { desc = "Find string in cwd" })
+            keymap.set("n", "<leader>fg", ":lua require('telescope').extensions.live_grep_args.live_grep_args()<CR>", { desc = "Find string in cwd" })
             keymap.set("n", "<leader>fw", function()
-                local word = vim.fn.expand("<cword>")
+                local word = nvim.get_cursor_word()
 
                 require("telescope.builtin").live_grep({
                     default_text = word,

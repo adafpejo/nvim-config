@@ -11,7 +11,7 @@ return {
             "hrsh7th/nvim-cmp",
             "WhoIsSethDaniel/mason-tool-installer.nvim",
             "saadparwaiz1/cmp_luasnip",
-            "stevearc/conform.nvim",
+            -- "stevearc/conform.nvim",
             "j-hui/fidget.nvim",
             { "antosha417/nvim-lsp-file-operations", config = true },
         },
@@ -20,10 +20,6 @@ return {
             -- local capabilities =
             --     vim.tbl_deep_extend("force", vim.lsp.protocol.make_client_capabilities(), require("epo").register_cap())
             --
-
-            require("conform").setup({
-                formatters_by_ft = {},
-            })
 
             local cmp = require("cmp")
             local cmp_lsp = require("cmp_nvim_lsp")
@@ -72,17 +68,21 @@ return {
             require("mason-lspconfig").setup({
                 -- list of servers for mason to install
                 ensure_installed = {
-                    "tsserver",
+                    "ts_ls",
+                    "rescriptls",
+                    "helm_ls",
                     "jsonls",
+                    "yamlls",
                     "eslint@4.8.0",
                     "html",
                     "cssls",
                     "tailwindcss",
                     "svelte",
+                    "gopls",
                     "lua_ls",
                     "dockerls",
                     "prismals",
-                    "gopls",
+                    "terraformls",
                     -- "graphql",
                     -- "emmet_ls",
                     "pyright",
@@ -93,15 +93,34 @@ return {
                 -- auto-install configured servers (with lspconfig)
                 automatic_installation = true, -- not the same as ensure_installed
                 handlers = {
-                    function(server_name) -- default handler (optional)
+                    function(server_name)      -- default handler (optional)
                         require("lspconfig")[server_name].setup({
                             capabilities = capabilities,
+                            flags = {
+                                debounce_text_changing = 150
+                            }
                             -- on_attach = on_attach,
                         })
                     end,
-                    ["tsserver"] = function()
+                    ["rescriptls"] = function()
                         local lspconfig = require("lspconfig")
-                        lspconfig.tsserver.setup({
+                        lspconfig.helm_ls.setup({})
+                    end,
+                    ["yamlls"] = function()
+                        local lspconfig = require("lspconfig")
+                        lspconfig.yamlls.setup({
+                            filetypes = { "yaml" },
+                        })
+                    end,
+                    ["helm_ls"] = function()
+                        local lspconfig = require("lspconfig")
+                        lspconfig.helm_ls.setup({
+                            filetypes = { "helm" }
+                        })
+                    end,
+                    ["ts_ls"] = function()
+                        local lspconfig = require("lspconfig")
+                        lspconfig.ts_ls.setup({
                             capabilities = capabilities,
                             -- on_attach = on_attach,
                             root_dir = function(...)
@@ -145,14 +164,14 @@ return {
 
             require("mason-tool-installer").setup({
                 ensure_installed = {
-                    "prettier", -- prettier formatter
-                    "prettierd", -- prettier formatter
-                    "stylua", -- lua formatter
-                    "isort", -- python formatter
+                    "prettier",      -- prettier formatter
+                    "prettierd",     -- prettier formatter
+                    "stylua",        -- lua formatter
+                    "isort",         -- python formatter
                     "golangci-lint", -- golang linter
-                    "black", -- python formatter
-                    "pylint", -- python linter
-                    "eslint_d", -- js linter
+                    "black",         -- python formatter
+                    "pylint",        -- python linter
+                    "eslint_d",      -- js linter
                 },
             })
             --------

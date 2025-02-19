@@ -1,3 +1,8 @@
+-- don't use packages here, use only after lazy_init
+--
+vim.g.mapleader = " "
+vim.g.maplocalleader = ","
+
 -- cursor change on insert mode
 vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
 

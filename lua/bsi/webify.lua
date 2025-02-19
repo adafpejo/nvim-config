@@ -1,8 +1,33 @@
-local git = require("git_utils")
-local foo = 4
-local url_utils = require("url_utils")
+local git = require("bsi.git")
 
 local M = {}
+
+local function split_remote_url(remote_url)
+    local remote_url = remote_url:gsub('http[s]+://', '')
+    remote_url = remote_url:gsub('.*@', '')
+    local pattern = '([%w%p]+)[:/]([%w%p]+)/([%w%p]+)'
+    local base,user,repo = string.match(remote_url, pattern)
+    if not base then
+        print('pattern did not match')
+        return nil
+    end
+    repo = repo:gsub('%.git$', '')
+    return base,user,repo
+end
+
+local function build_base_url_to_current_file(base, user, repo, branch, relative_path, line)
+    local url = nil
+    if string.find(base, 'github') then
+        url = string.format('https://%s/%s/%s/blob/%s/%s', base, user, repo, branch, relative_path)
+    else
+        url = string.format('https://%s/%s/%s/-/blob/%s/%s', base, user, repo, branch, relative_path)
+    end
+    if line then
+        return string.format('%s#L%d', url, line)
+    end
+    return url
+end
+
 
 function get_relative_file_path(repo_root)
     local current = vim.api.nvim_buf_get_name(0):gsub("%s+", "")
@@ -30,11 +55,11 @@ function get_url(with_line)
     if not remote_url then
         return nil
     end
-    local base, user, repo = url_utils.split_remote_url(remote_url)
+    local base, user, repo = split_remote_url(remote_url)
     if not base then
         return nil
     end
-    local url_to_current_file = url_utils.build_base_url_to_current_file(
+    local url_to_current_file = build_base_url_to_current_file(
         base,
         user,
         repo,

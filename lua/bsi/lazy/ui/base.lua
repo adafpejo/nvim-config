@@ -1,6 +1,4 @@
 return {
-    { "nvim-pack/nvim-spectre" },
-    { "onsails/lspkind.nvim" },
     { "rcarriga/nvim-notify" },
     {
         "kdheepak/lazygit.nvim",
@@ -40,6 +38,12 @@ return {
                 view = {
                     width = 40,
                 },
+                git = {
+                    enable = true,
+                    disable_for_dirs = {
+                        "node_modules",
+                    },
+                },
                 renderer = {
                     highlight_modified = "all",
                     highlight_git = true,
@@ -67,6 +71,7 @@ return {
     },
     {
         "akinsho/bufferline.nvim",
+        enabled = false,
         dependencies = { "nvim-tree/nvim-web-devicons" },
         version = "*",
         keys = {

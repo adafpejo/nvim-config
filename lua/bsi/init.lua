@@ -1,6 +1,13 @@
 require("bsi.set")
-require("bsi.remap")
 require("bsi.lazy_init")
+require("bsi.remap")
+require("bsi.refactoring")
+local nvim = require("bsi.utils.nvim")
+
+require('notify').setup({
+    timeout = 200
+})
+vim.notify_popup = require('notify')
 
 -- Autocmds are automatically loaded on the VeryLazy event
 -- Default autocmds that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/autocmds.lua
@@ -13,6 +20,20 @@ end
 local autocmd = vim.api.nvim_create_autocmd
 
 local bsiGroup = augroup("bsi")
+
+-- lint/format buffer before save
+autocmd("BufWritePre", {
+    group = bsiGroup,
+    pattern = "*",
+    command = [[%s/\s\+$//e]],
+})
+autocmd("BufWritePre", {
+    pattern = { "*.js", "*.ts", "*.tsx", "*.jsx" },
+    group = bsiGroup,
+    callback = function()
+        vim.cmd("silent! EslintFixAll")
+    end,
+})
 
 -- autocmd({ "FileType" }, {
 --     pattern = { "json", "jsonc", "json5", "markdown" },
@@ -42,10 +63,36 @@ autocmd("TextYankPost", {
     end,
 })
 
-autocmd("BufWritePost", {
-    group = bsiGroup,
-    pattern = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
-    command = "silent! EslintFixAll",
+autocmd({ 'BufNewFile', 'BufRead' }, {
+    pattern = {
+        "**/templates/*.yaml",
+        "**/templates/*.yml",
+        "**/templates/*.tpl",
+        "*.gotmpl",
+    },
+    callback = function()
+        vim.opt_local.filetype = 'helm'
+    end
+})
+
+autocmd({ "FileType" }, {
+    pattern = { "helm", "terraform" },
+    callback = function()
+        vim.schedule(function()
+            nvim.stop_lsp_byname("yamlls")
+        end)
+    end
+})
+
+autocmd({ "FileType" }, {
+    pattern = { "markdown" },
+    callback = function()
+        vim.opt.wrap = true
+        vim.opt.linebreak = true
+        vim.opt.list = false
+        vim.opt.textwidth = 120
+        vim.opt.wrapmargin = 0
+    end
 })
 
 -- close some filetypes with <q>
@@ -102,6 +149,7 @@ autocmd("LspAttach", {
         opts.desc = "Show LSP definitions"
         keymap.set("n", "gd", function()
             require("telescope.builtin").lsp_definitions()
+            -- vim.lsp.buf.definition()
         end, opts) -- show lsp definitions
 
         opts.desc = "Show LSP implementations"
@@ -124,9 +172,6 @@ autocmd("LspAttach", {
                 },
             })
         end, opts)
-
-        opts.desc = "Lsp Info"
-        keymap.set("n", "<leader>cl", "<cmd>LspInfo<CR>", opts)
 
         opts.desc = "Smart rename"
         keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts) -- smart rename

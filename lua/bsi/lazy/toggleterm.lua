@@ -7,6 +7,5 @@ return {
             open_mapping = [[<c-/>]],
         },
         config = true,
-    },
-    { 'christoomey/vim-tmux-navigator', }
+    }
 }
