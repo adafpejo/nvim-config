@@ -1,5 +1,12 @@
 local M = {}
 
+--- Escapes single and double quotes in a string by prepending a backslash.
+--- @param str string: The input string to escape.
+--- @return string, number: The string with quotes escaped.
+function M.escape_quotes(str)
+    return str:gsub("'", "\\'"):gsub('"', '\\"')
+end
+
 function M.has_value(table, val)
     for _, value in ipairs(table) do
         if value == val then

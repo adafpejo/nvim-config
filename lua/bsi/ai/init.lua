@@ -11,10 +11,6 @@ local event   = require("nui.utils.autocmd").event
 
 local M       = {}
 
-function M.cmd_gsub(str)
-    return str:gsub("'", "\\'"):gsub('"', '\\"')
-end
-
 --- @param prompt string
 --- @param context string
 --- @return string
@@ -26,10 +22,10 @@ function M.ask_llm(instruction)
     nvim.assert_empty_string(instruction, "empty instruction")
 
     local llm_result = llama.generate_llama(instruction)
-    vim.notify_popup(llm_result)
     nvim.assert_empty_string(llm_result, "empty llm_result")
 
     nvim.save_to_clipboard(llm_result)
+    vim.notify_popup(utils.escape_quotes(llm_result))
     vim.notify_popup("done! past clipboard")
 end
 
