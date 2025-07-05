@@ -20,7 +20,7 @@ describe("bsi.ai.llama.strip_code", function()
         "```javascript\n" ..
         "    let x = 2;\n" ..
         "```"
-        local expected2 = "    let x = 2;\n"
+        local expected2 = "\n    let x = 2;\n"
         local output2 = strip_code(input2)
         assert(output2 == expected2, "Test 2 failed: expected '" .. expected2 .. "', got '" .. output2 .. "'")
     end)

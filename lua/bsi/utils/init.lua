@@ -4,7 +4,7 @@ local M = {}
 --- @param str string: The input string to escape.
 --- @return string, number: The string with quotes escaped.
 function M.escape_quotes(str)
-    return str:gsub("'", "\\'"):gsub('"', '\\"')
+    return str:gsub("'", "\'"):gsub('"', '\"')
 end
 
 function M.has_value(table, val)
@@ -34,6 +34,15 @@ function M.table_values(t)
         result_table[i] = t[k]
     end
     return result_table
+end
+
+function M.url_encode(str)
+  if str then
+    str = str:gsub("([^%w%-_.~])", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+  end
+  return str
 end
 
 return M

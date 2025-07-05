@@ -2,6 +2,7 @@ local async         = require('bsi.utils.async')
 local req           = require('bsi.utils.req')
 local strip_code    = require('bsi.ai.llama.strip_code')
 local prompts       = require('bsi.ai.llama.prompts')
+local logger        = require('bsi.logger')
 
 local M             = {}
 
@@ -27,8 +28,9 @@ function M.generate(model, prompt, options)
         options = options
     }
 
-    req.http_post("127.0.0.1", 11434, "/api/generate", payload, function(data)
+    req.http_post("localhost", 11434, "/api/generate", payload, function(error, data)
         local response = get_llama_res(data)
+        logger:debug("LLM response: " .. response)
         async.co.resume(co, response)
     end)
 
@@ -46,9 +48,7 @@ function M.coder(text, visual)
         top_p = 0.9,
     }
 
-    local llm_result = M.generate(default_model, prompt, options)
-
-    return strip_code(llm_result)
+    return M.generate(default_model, prompt, options)
 end
 
 function M.comment(text)

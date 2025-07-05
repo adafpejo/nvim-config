@@ -92,10 +92,7 @@ end
 
 --- @class CockpitOptions
 --- @field log_file_path string | nil
---- @field language_import_filter table<string, string[]> a list of strings that if exist within the LSP response for file import following will be ignored
 --- @field log_level number | nil
---- @field save_queries boolean
---- @field save_queries_path string
 
 --- @param config CockpitOptions
 function Logger:init(config)

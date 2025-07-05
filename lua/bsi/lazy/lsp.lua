@@ -2,8 +2,8 @@ return {
     {
         "neovim/nvim-lspconfig",
         dependencies = {
-            "williamboman/mason.nvim",
-            "williamboman/mason-lspconfig.nvim",
+            { "mason-org/mason.nvim",           version = "1.11.0" },
+            { "mason-org/mason-lspconfig.nvim", version = "1.32.0" },
             "hrsh7th/cmp-nvim-lsp",
             "hrsh7th/cmp-buffer",
             "hrsh7th/cmp-path",
@@ -78,7 +78,7 @@ return {
                     "cssls",
                     "tailwindcss",
                     "svelte",
-                    "gopls",
+                    "gopls@1.24.0",
                     "lua_ls",
                     "dockerls",
                     "prismals",
@@ -92,14 +92,27 @@ return {
                 },
                 -- auto-install configured servers (with lspconfig)
                 automatic_installation = true, -- not the same as ensure_installed
+                automatic_enable = false,
                 handlers = {
-                    function(server_name)      -- default handler (optional)
+                    function(server_name) -- default handler (optional)
                         require("lspconfig")[server_name].setup({
                             capabilities = capabilities,
                             flags = {
                                 debounce_text_changing = 150
                             }
                             -- on_attach = on_attach,
+                        })
+                    end,
+                    ["pyright"] = function()
+                        local lspconfig = require("lspconfig")
+                        lspconfig.pyright.setup({
+                            settings = {
+                                python = {
+                                    pythonPath = "/env/bin/python",
+                                    venvPath = ".",
+                                    venv = "env"
+                                }
+                            }
                         })
                     end,
                     ["rescriptls"] = function()
@@ -137,12 +150,15 @@ return {
                             capabilities = capabilities,
                             settings = {
                                 Lua = {
-                                    runtime = { version = "Lua 5.1" },
-                                    diagnostics = {
-                                        globals = { "bit", "vim", "it", "describe", "before_each", "after_each" },
+                                    runtime = {
+                                        version = 'LuaJIT', -- Neovim uses LuaJIT
                                     },
+                                    workspace = {
+                                        library = vim.api.nvim_get_runtime_file("", true), -- Include Neovim runtime files
+                                    },
+                                    telemetry = { enable = false }, -- Optional: disable telemetry,
                                 },
-                            },
+                            }
                         })
                     end,
                     ["eslint"] = function()
@@ -159,6 +175,13 @@ return {
                             -- end,
                         })
                     end,
+                    ["dartls"] = function()
+                        require("lspconfig").dartls.setup({
+                            capabilities = capabilities,
+                            filetypes = { "dart" },
+                            cmd = { "dart", "language-server", "--protocol=lsp" }
+                        })
+                    end
                 },
             })
 

@@ -1,6 +1,23 @@
 local async = require("bsi.utils.async")
+local logger= require("bsi.logger")
 
 local M = {}
+
+-- Function to get current buffer file path
+function M.get_buffer_file_path()
+    local filepath = vim.api.nvim_buf_get_name(0)
+    if filepath == "" then
+        return nil, "No file associated with current buffer"
+    end
+    return filepath, nil
+end
+
+-- Function to get current buffer content
+function M.get_buffer_content()
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    local content = table.concat(lines, "\n")
+    return content
+end
 
 --- highlight text sentence inside current buffer
 --- @param word string
@@ -17,10 +34,32 @@ function M.move_cursor_down()
     vim.api.nvim_win_set_cursor(0, { new_line, current_pos[2] })
 end
 
+
 function M.move_cursor_up()
     local current_pos = vim.api.nvim_win_get_cursor(0)
     local new_line = math.max(current_pos[1] - 1, 1)
     vim.api.nvim_win_set_cursor(0, { new_line, current_pos[2] })
+end
+
+--- Checks if a given path is an existing directory.
+--- @param dir string The path to check.
+--- @return boolean True if the path exists and is a directory, false otherwise.
+function M.dir_exists(dir)
+  local stat = vim.uv.fs_stat(dir)
+  if stat ~= nil and stat.type == "directory" then
+    return true
+  end
+  return false
+end
+
+-- Get current file path
+function M.get_file_path()
+    return vim.fn.expand('%')
+end
+
+-- Get cursor line nunmber
+function M.get_cursor_line_number()
+    return vim.api.nvim_win_get_cursor(0)[1]
 end
 
 --- Get word under cursor
@@ -37,9 +76,12 @@ function M.concat_to_single_str(lines)
     return table.concat(lines, '\n')
 end
 
-function M.save_to_clipboard(lines)
-    vim.fn.setreg('+', lines)
-end
+--- Saves a given string to the system clipboard.
+--- @param lines string: The text to copy.
+--- TODO: review schedule_wrap
+M.save_to_clipboard = vim.schedule_wrap(function(lines)
+    vim.fn.setreg("+", lines)
+end)
 
 function M.stop_lsp_byname(name)
     -- Check if yamlls is attached to the buffer
@@ -54,6 +96,7 @@ end
 
 function M.assert_empty_string(var, error_msg)
     if not var or var == "" then
+        logger:error(error_msg)
         error(error_msg)
     end
 end

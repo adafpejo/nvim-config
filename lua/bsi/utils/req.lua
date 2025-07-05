@@ -1,7 +1,64 @@
 local logger = require('bsi.logger')
-local http = require('http')
 
 local M = {}
+
+-- Function to break a flat table into a 2D table of pairs
+local function break_table_to_2d(inputTable)
+    local result = {}
+    local pair = {}
+    local pairIndex = 1
+
+    for i, value in ipairs(inputTable) do
+        pair[pairIndex] = value
+        pairIndex = pairIndex + 1
+
+        if pairIndex > 2 then
+            table.insert(result, pair)
+            pair = {}
+            pairIndex = 1
+        end
+    end
+
+    if pairIndex > 1 then
+        table.insert(result, pair)
+    end
+
+    return result
+end
+
+local function read_chunked_response(headers, response_body)
+    local fullBody = ""
+
+    local chunks = break_table_to_2d(vim.split(response_body, "\r\n"))
+
+    for _, subTable in ipairs(chunks) do
+        local chunkSize = tonumber(subTable[1], 16)
+        local chunkData = subTable[2]
+
+        if chunkSize == 0 then
+            break -- Zero-length chunk indicates end of body
+        end
+
+        fullBody = fullBody .. chunkData
+    end
+
+    -- Step 8: Return the full reassembled body
+    return fullBody
+end
+
+local function read_single_response(headers, response_body)
+    local body = ""
+    local content_length = headers["content-length"]
+    content_length = tonumber(content_length)
+    if content_length then
+        body = response_body:sub(1, content_length)
+    elseif logger then
+        -- Log warning instead of error; proceed with full bo
+        logger:warn("Invalid Content-Length: " .. headers["content-length"])
+    end
+
+    return body
+end
 
 --- Extracts the HTTP response body and metadata from a raw HTTP message.
 --- @param buf string: The full HTTP response (headers and body).
@@ -40,18 +97,13 @@ local function decode_http(buf)
         end
     end
 
-    -- Apply Content-Length if present
-    local content_length = headers["content-length"]
-    if content_length then
-        content_length = tonumber(content_length)
-        if content_length then
-            body = body:sub(1, content_length)
-        else
-            -- Log warning instead of error; proceed with full body
-            if logger then
-                logger:warn("Invalid Content-Length: " .. headers["content-length"])
-            end
-        end
+    local chunked = headers['transfer-encoding'] == 'chunked'
+    if chunked then
+        logger:debug("read_chunked_response...")
+        body = read_chunked_response(headers, body)
+    else
+        logger:debug("read_single_response...")
+        body = read_single_response(headers, body)
     end
 
     return body, nil, status_code
@@ -98,8 +150,10 @@ function M.http_post(host, port, path, json, callback)
             if data then
                 buffer = buffer .. data
             else
+                logger:debug(buffer)
                 -- Connection closed; process the full response
                 local body, decode_err, status_code = decode_http(buffer)
+                logger:debug("Body: \n" .. body)
                 if decode_err then
                     callback(decode_err, nil)
                 elseif status_code ~= 200 then
@@ -129,6 +183,7 @@ function M.http_post(host, port, path, json, callback)
             "%s",
             path, host, #data, data
         )
+        logger:debug(request)
         client:write(request, function(err)
             if err then
                 callback("Write error: " .. err, nil)

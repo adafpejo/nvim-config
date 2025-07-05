@@ -15,6 +15,7 @@ return {
             { "marilari88/neotest-vitest" },
             { "HiPhish/neotest-busted" },
             { "thenbe/neotest-playwright" },
+            { "nvim-neotest/neotest-python" },
 
             -- adapters
             { "nvim-neotest/neotest-go",  commit = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
@@ -118,6 +119,20 @@ return {
                 --   -- https://github.com/cargo-bins/cargo-binstall
                 --   -- https://nexte.st/book/pre-built-binaries.html
                 -- },
+                ["neotest-python"] = {
+                    -- Command line arguments for runner
+                    -- Can also be a function to return dynamic values
+                    args = {"--log-level", "DEBUG"},
+                    -- Runner to use. Will use pytest if available by default.
+                    -- Can be a function to return dynamic value.
+                    runner = "env/bin/pytest",
+                    -- Custom python path for the runner.
+                    -- Can be a string or a list of strings.
+                    -- Can also be a function to return dynamic value.
+                    -- If not provided, the path will be inferred by checking for
+                    -- virtual envs in the local directory and for Pipenev/Poetry configs
+                    python = "env/bin/python",
+                },
                 ["neotest-jest"] = {
                     cwd = function()
                         return vim.fn.getcwd()

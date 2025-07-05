@@ -1,7 +1,9 @@
-local nvim = require("bsi.utils.nvim")
+local nvim  = require("bsi.utils.nvim")
 local async = require("bsi.utils.async")
+local git   = require("bsi.git")
+local dx    = require("bsi.dx")
 
-local M = {}
+local M     = {}
 
 --- Info popup
 --- @param str string
@@ -9,6 +11,81 @@ function M.info_popup(str)
     vim.notify_popup(str, {
         timeout = 100
     })
+end
+
+function M.open_git_repo()
+    local remote_url = git.get_remote_origin()
+    assert(#remote_url > 0, "Failed to get remote origin")
+
+    local remote_url_https = git.convert_origin_to_https(remote_url)
+    dx.open_url(remote_url_https)
+end
+
+--- Opens the current commit in the Git repository web interface
+function M.open_git_commit()
+    local commit_hash = git.get_current_commit_hash()
+    assert(commit_hash and #commit_hash > 0, "Failed to get current commit hash")
+
+    local remote_url = git.get_remote_origin()
+    assert(remote_url and #remote_url > 0, "Failed to get remote origin")
+
+    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local commit_url = string.format("%s/-/commit/%s", remote_url_https, commit_hash)
+
+    dx.open_url(commit_url)
+end
+
+--- Opens the current file at the current line in the Git repository web interface
+function M.open_git_commit_line()
+    local commit_hash = git.get_current_commit_hash()
+    assert(commit_hash and #commit_hash > 0, "Failed to get current commit hash")
+
+    local file_path = nvim.get_file_path()
+    local line_number = nvim.get_cursor_line_number()
+
+    local repo_root = git.get_repo_root()
+    assert(repo_root and #repo_root > 0, "Failed to get repo root")
+
+    local relative_file_path = file_path:gsub('^' .. repo_root .. '/', '')
+
+    local remote_url = git.get_remote_origin()
+    assert(remote_url and #remote_url > 0, "Failed to get remote origin")
+
+    local remote_url_https = git.convert_origin_to_https(remote_url)
+
+    local line_url = string.format("%s/-/blob/%s/%s#L%d", remote_url_https, commit_hash, relative_file_path, line_number)
+
+    dx.open_url(line_url)
+end
+
+--- Opens the Git repository pipelines page
+function M.open_git_pipelines()
+    local remote_url = git.get_remote_origin()
+    assert(remote_url and #remote_url > 0, "Failed to get remote origin")
+
+    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local pipelines_url = string.format("%s/-/pipelines", remote_url_https)
+
+    dx.open_url(pipelines_url)
+end
+
+function M.open_gitlab_mr()
+    -- Get the current branch
+    local current_branch = git.get_current_branch()
+
+    -- Get the remote origin URL
+    local remote_url = git.get_remote_origin()
+
+    if not current_branch or not remote_url then
+        error("Failed to get branch or remote URL")
+        return
+    end
+
+    local remote_url_https = git.convert_origin_to_https(remote_url)
+
+    local mr_url = remote_url_https .. "/-/merge_requests/new?merge_request%5Bsource_branch%5D=" .. current_branch
+
+    dx.open_url(mr_url)
 end
 
 --- Open inline input one string

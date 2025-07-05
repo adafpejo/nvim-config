@@ -26,7 +26,7 @@ return {
             "nvim-tree/nvim-web-devicons",
         },
         config = function()
-            local api = require("nvim-tree.api")
+            local nt_api = require("nvim-tree.api")
 
             require("nvim-tree").setup({
                 update_focused_file = {
@@ -62,10 +62,17 @@ return {
                         "node_modules",
                     },
                 },
+                on_attach = function(bufnr)
+                    local api = require("nvim-tree.api")
+                    api.config.mappings.default_on_attach(bufnr)
+                    vim.keymap.del('n', '<C-k>', {
+                        buffer = bufnr
+                    })
+                end,
             })
 
             vim.keymap.set("n", "<leader>ee", function()
-                api.tree.toggle({ find_file = true })
+                nt_api.tree.toggle({ find_file = true })
             end, { desc = "NvimTreeToggle" })
         end,
     },
@@ -75,16 +82,16 @@ return {
         dependencies = { "nvim-tree/nvim-web-devicons" },
         version = "*",
         keys = {
-            { "<leader>bp", "<Cmd>BufferLineTogglePin<CR>", desc = "Toggle pin" },
+            { "<leader>bp", "<Cmd>BufferLineTogglePin<CR>",            desc = "Toggle pin" },
             { "<leader>bP", "<Cmd>BufferLineGroupClose ungrouped<CR>", desc = "Delete non-pinned buffers" },
-            { "<leader>bo", "<Cmd>BufferLineCloseOthers<CR>", desc = "Delete other buffers" },
-            { "<leader>br", "<Cmd>BufferLineCloseRight<CR>", desc = "Delete buffers to the right" },
-            { "<leader>bl", "<Cmd>BufferLineCloseLeft<CR>", desc = "Delete buffers to the left" },
-            { "<leader>bd", "<Cmd>:bp|bd#<CR>", desc = "Close current buffer" },
-            { "<S-h>", "<cmd>BufferLineCyclePrev<cr>", desc = "Prev buffer" },
-            { "<S-l>", "<cmd>BufferLineCycleNext<cr>", desc = "Next buffer" },
-            { "[b", "<cmd>BufferLineCyclePrev<cr>", desc = "Prev buffer" },
-            { "]b", "<cmd>BufferLineCycleNext<cr>", desc = "Next buffer" },
+            { "<leader>bo", "<Cmd>BufferLineCloseOthers<CR>",          desc = "Delete other buffers" },
+            { "<leader>br", "<Cmd>BufferLineCloseRight<CR>",           desc = "Delete buffers to the right" },
+            { "<leader>bl", "<Cmd>BufferLineCloseLeft<CR>",            desc = "Delete buffers to the left" },
+            { "<leader>bd", "<Cmd>:bp|bd#<CR>",                        desc = "Close current buffer" },
+            { "<S-h>",      "<cmd>BufferLineCyclePrev<cr>",            desc = "Prev buffer" },
+            { "<S-l>",      "<cmd>BufferLineCycleNext<cr>",            desc = "Next buffer" },
+            { "[b",         "<cmd>BufferLineCyclePrev<cr>",            desc = "Prev buffer" },
+            { "]b",         "<cmd>BufferLineCycleNext<cr>",            desc = "Next buffer" },
         },
         config = function()
             require("bufferline").setup({

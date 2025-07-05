@@ -1,7 +1,9 @@
 require("bsi.set")
 require("bsi.lazy_init")
+require("bsi.postload")
 require("bsi.remap")
 require("bsi.refactoring")
+
 local nvim = require("bsi.utils.nvim")
 
 require('notify').setup({
@@ -85,6 +87,17 @@ autocmd({ "FileType" }, {
 })
 
 autocmd({ "FileType" }, {
+    pattern = { "helm" },
+    callback = function()
+        vim.opt.tabstop = 2
+        vim.opt.shiftwidth = 2
+        vim.opt.expandtab = true
+        vim.opt.autointent = true
+        vim.opt.smartintent = true
+    end
+})
+
+autocmd({ "FileType" }, {
     pattern = { "markdown" },
     callback = function()
         vim.opt.wrap = true
@@ -119,6 +132,17 @@ autocmd("FileType", {
         vim.bo[event.buf].buflisted = false
         vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = event.buf, silent = true })
         vim.keymap.set("t", "<Esc>", "<cmd>close<cr>", { buffer = event.buf, silent = true })
+    end,
+})
+autocmd("FileType", {
+    group = augroup("close_with_q"),
+    pattern = {
+        "diffview"
+    },
+    callback = function(event)
+        vim.bo[event.buf].buflisted = false
+        vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = event.buf, silent = true })
+        vim.keymap.set("t", "<Esc>", "<cmd>tabclose<cr>", { buffer = event.buf, silent = true })
     end,
 })
 

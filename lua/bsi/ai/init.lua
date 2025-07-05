@@ -18,15 +18,14 @@ local function buildPopupInfo(prompt, context)
     return "Prompt:\n" .. prompt .. "\n\nContext: \n" .. context
 end
 
-function M.ask_llm(instruction)
+function M.ask_llm(instruction, options)
     nvim.assert_empty_string(instruction, "empty instruction")
 
-    local llm_result = llama.generate_llama(instruction)
+    local llm_result = llama.generate_llama(instruction, options)
     nvim.assert_empty_string(llm_result, "empty llm_result")
 
+    vim.notify_popup(llm_result)
     nvim.save_to_clipboard(llm_result)
-    vim.notify_popup(utils.escape_quotes(llm_result))
-    vim.notify_popup("done! past clipboard")
 end
 
 function M.ask_english()
@@ -40,6 +39,23 @@ function M.ask_english()
         })
 
         M.ask_llm(english_prompt)
+    end)
+    if not status then
+        vim.notify("corutine error: " .. result)
+    end
+end
+
+function M.ask_comment()
+    local status, result = async.run(function()
+        local visual_selection = nvim.get_visual_selection()
+        local instruction = "write comment"
+
+        local coder_prompt = string.format("%s\n---\n%s", instruction, visual_selection)
+        vim.notify_popup(coder_prompt, "info", {
+            timeout = 100
+        })
+
+        M.ask_llm(coder_prompt, {max_tokens=20})
     end)
     if not status then
         vim.notify("corutine error: " .. result)
@@ -88,8 +104,10 @@ end
 function M.ask()
     local status, result = async.run(function()
         local instruction = ide.open_inline_input()
+        local buffer_path = nvim.get_buffer_file_path()
+        local buffer_content = nvim.get_buffer_content()
 
-        vim.notify_popup(string.format("Prompt:\n%s", instruction), "info", {
+        vim.notify_popup(string.format("Prompt:\n%s\n%s\n%s\n", instruction, buffer_path, buffer_content), "info", {
             timeout = 100
         })
 
@@ -101,54 +119,54 @@ function M.ask()
 end
 
 local function list_options_picker(visual_selection)
-        ai_menu = Menu({
-            relative = "cursor",
-            position = {
-                row = 1,
-                col = 0,
+    local ai_menu = Menu({
+        relative = "cursor",
+        position = {
+            row = 1,
+            col = 0,
+        },
+        border = {
+            style = "rounded",
+            text = {
+                top = "[Choose Item]",
+                top_align = "center",
             },
-            border = {
-                style = "rounded",
-                text = {
-                    top = "[Choose Item]",
-                    top_align = "center",
-                },
-            },
-            win_options = {
-                winhighlight = "Normal:Normal",
-            }
-        }, {
-            lines = {
-                Menu.item("comment"),
-                Menu.item("english"),
-                Menu.item("coder"),
-            },
-            max_width = 20,
-            keymap = {
-                focus_next = { "j", "<Down>", "<Tab>" },
-                focus_prev = { "k", "<Up>", "<S-Tab>" },
-                close = { "<Esc>", "<C-c>" },
-                submit = { "<CR>", "<Space>" },
-            },
-            on_close = function()
-                print("CLOSED")
-            end,
-            on_submit = function(item)
-                local prompt = prompts.prompt_tbl[item.text]
+        },
+        win_options = {
+            winhighlight = "Normal:Normal",
+        }
+    }, {
+        lines = {
+            Menu.item("comment"),
+            Menu.item("english"),
+            Menu.item("coder"),
+        },
+        max_width = 20,
+        keymap = {
+            focus_next = { "j", "<Down>", "<Tab>" },
+            focus_prev = { "k", "<Up>", "<S-Tab>" },
+            close = { "<Esc>", "<C-c>" },
+            submit = { "<CR>", "<Space>" },
+        },
+        on_close = function()
+            print("CLOSED")
+        end,
+        on_submit = function(item)
+            local prompt = prompts.prompt_tbl[item.text]
 
-                local status, result = async.run(function()
-                    nvim.assert_empty_string(visual_selection, "empty visual selection")
-                    vim.notify_popup(buildPopupInfo(prompt, visual_selection), "info", {
-                        timeout = 100
-                    })
+            local status, result = async.run(function()
+                nvim.assert_empty_string(visual_selection, "empty visual selection")
+                vim.notify_popup(buildPopupInfo(prompt, visual_selection), "info", {
+                    timeout = 100
+                })
 
-                    M.ask_llm(prompts.prompt_map[item.text](visual_selection))
-                end)
-                if not status then
-                    vim.notify("corutine error: " .. result)
-                end
-            end,
-        })
+                M.ask_llm(prompts.prompt_map[item.text](visual_selection))
+            end)
+            if not status then
+                vim.notify("corutine error: " .. result)
+            end
+        end,
+    })
 
     ai_menu:on(event.BufLeave, function()
         ai_menu:unmount()

@@ -1,18 +1,16 @@
 local git = require("bsi.git")
+local dx = require("bsi.dx")
 
 local M = {}
 
 local function split_remote_url(remote_url)
-    local remote_url = remote_url:gsub('http[s]+://', '')
-    remote_url = remote_url:gsub('.*@', '')
-    local pattern = '([%w%p]+)[:/]([%w%p]+)/([%w%p]+)'
-    local base,user,repo = string.match(remote_url, pattern)
+    local pattern = 'http[s]+://([%w%p]+)/([%w%p]+)/([%w%p]+)'
+    local base, user, repo = string.match(remote_url, pattern)
     if not base then
         print('pattern did not match')
         return nil
     end
-    repo = repo:gsub('%.git$', '')
-    return base,user,repo
+    return base, user, repo
 end
 
 local function build_base_url_to_current_file(base, user, repo, branch, relative_path, line)
@@ -29,7 +27,7 @@ local function build_base_url_to_current_file(base, user, repo, branch, relative
 end
 
 
-function get_relative_file_path(repo_root)
+local function get_relative_file_path(repo_root)
     local current = vim.api.nvim_buf_get_name(0):gsub("%s+", "")
     local s, e = string.find(current, repo_root, 1, true)
     if s ~= 1 then
@@ -40,21 +38,17 @@ function get_relative_file_path(repo_root)
     return removed
 end
 
-function get_current_line()
+local function get_current_line()
     local r, _ = unpack(vim.api.nvim_win_get_cursor(0))
     return r
 end
 
-function get_url(with_line)
-    local remotes = git.get_remotes()
-    if not remotes then
+local function get_url(with_line)
+    local remote = git.get_remote_origin()
+    if not remote then
         return nil
     end
-    local remote = remotes[1]
-    local remote_url = git.get_remote_url(remote)
-    if not remote_url then
-        return nil
-    end
+    local remote_url = git.convert_origin_to_https(remote)
     local base, user, repo = split_remote_url(remote_url)
     if not base then
         return nil
@@ -73,25 +67,17 @@ function get_url(with_line)
     return url_to_current_file
 end
 
-function open_in_browser(url)
-    if url then
-        vim.fn.jobstart({ "open", url }, { detach = true })
-    else
-        print("Could not open file")
-    end
-end
-
-function yank_to_register(register, url)
+local function yank_to_register(register, url)
     local cmd = string.format('let @%s = "%s"', register, url)
     vim.cmd(cmd)
     print(url, "yanked to register '" .. register .. "'")
 end
 
 M.open_file_in_browser = function()
-    open_in_browser(get_url(false))
+    dx.open_url(get_url(false))
 end
 M.open_line_in_browser = function()
-    open_in_browser(get_url(true))
+    dx.open_url(get_url(true))
 end
 M.yank_file_url = function(register)
     return yank_to_register(register, get_url(false))
