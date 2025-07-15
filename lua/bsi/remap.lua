@@ -6,8 +6,7 @@ local nt_api      = require("nvim-tree.api")
 local webify      = require("bsi.webify")
 local ide         = require("bsi.utils.ide")
 local fastgit     = require("bsi.fastgit")
-
-local view        = require('nvim-tree.view') -- for focus_node()
+local multigrep   = require("bsi.multigrep")
 
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
@@ -93,6 +92,9 @@ vim.keymap.set({ "n" }, "<C-k>", function()
     end
 end, { noremap = true, desc = "Open prev file" })
 
+-- Basic vim
+vim.keymap.set({ "n" }, "<CR>", ":w<CR>", { noremap = true, desc = "Save file" })
+
 vim.keymap.set({ "n" }, "H", "^", { noremap = true, desc = "First non-blank" })
 vim.keymap.set({ "n" }, "L", "g_", { noremap = true, desc = "Last non-blank" })
 
@@ -168,8 +170,11 @@ vim.keymap.set({ "n", "v" }, "<leader>]", ":Gen<CR>")
 vim.keymap.set({ "n" }, "<leader>h", dx.highlight_cursor_word, { noremap = true, desc = "Search word in current buffer" })
 vim.keymap.set({ "v" }, "<leader>h", dx.highlight_visual, { noremap = true, desc = "Search word in current buffer" })
 
--- Webify
+-- Telescope
+vim.keymap.set({ "n" }, "<leader>fs", multigrep.live_multigrep, { noremap = true, desc = "Search word in current root" })
+vim.api.nvim_create_user_command("TSC", multigrep.tsc_no_emit, {})
 
+-- Webify
 vim.keymap.set("n", "<leader>sw", function()
     local word = nvim.get_cursor_word()
     dx.search_google(word)
@@ -201,8 +206,7 @@ vim.cmd([[
       command! ReloadConfig lua require('user_config').reload_config()
     ]])
 
-
--- Map command to function in Neovim
+-- Git interaction
 vim.api.nvim_create_user_command("OpenMergeRequest", ide.open_gitlab_mr, {})
 vim.keymap.set("n", "<leader>gm", ide.open_gitlab_mr, { noremap = true })
 vim.keymap.set("n", "<leader>gr", ide.open_git_repo, { noremap = true })
@@ -213,33 +217,19 @@ vim.keymap.set("n", "<leader>gd", "<cmd>DiffviewFileHistory %<CR>", { noremap = 
 vim.keymap.set("n", "<leader>go", function()
     webify.open_file_in_browser()
 end, { desc = "Open in web browser" })
-vim.keymap.set("n", "<leader>gO", function()
-    webify.open_line_in_browser()
-end, { desc = "Open in web browser, including current line" })
-
+vim.keymap.set("n", "<leader>gy", function()
+    webify.yank_file_url()
+end, { desc = "yank_file_url" })
+vim.keymap.set("n", "<leader>gY", function()
+    webify.yank_line_url()
+end, { desc = "yank_line_url" })
 vim.keymap.set('n', '<leader>gi', fastgit.open_gitlab_pipelines, { noremap = true, silent = true })
+---
 
 vim.keymap.set("v", "<leader>s", function()
     local visual = nvim.get_visual_selection()
     dx.open_url(visual)
 end, { noremap = true })
-
-
--- Map Cmd+R to the ReloadConfig command
--- vim.api.nvim_set_keymap('n', '<D-r>', ':ReloadConfig<CR>', { noremap = true })
-
--- Unmap mappings used by tmux plugin
--- TODO(vintharas): There's likely a better way to do this.
--- vim.keymap.del("n", "<C-h>")
--- vim.keymap.del("n", "<C-j>")
--- vim.keymap.del("n", "<C-k>")
--- vim.keymap.del("n", "<C-l>")
--- vim.keymap.set("n", "<C-h>", "<cmd>TmuxNavigateLeft<cr>")
--- vim.keymap.set("n", "<C-j>", "<cmd>TmuxNavigateDown<cr>")
--- vim.keymap.set("n", "<C-k>", "<cmd>TmuxNavigateUp<cr>")
--- vim.keymap.set("n", "<C-l>", "<cmd>TmuxNavigateRight<cr>")
---
---
 
 local telescope = require('telescope')
 local actions = require('telescope.actions')

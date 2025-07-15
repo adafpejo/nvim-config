@@ -17,7 +17,7 @@ function M.open_git_repo()
     local remote_url = git.get_remote_origin()
     assert(#remote_url > 0, "Failed to get remote origin")
 
-    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local remote_url_https = git.convert_remote_to_https(remote_url)
     dx.open_url(remote_url_https)
 end
 
@@ -29,7 +29,7 @@ function M.open_git_commit()
     local remote_url = git.get_remote_origin()
     assert(remote_url and #remote_url > 0, "Failed to get remote origin")
 
-    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local remote_url_https = git.convert_remote_to_https(remote_url)
     local commit_url = string.format("%s/-/commit/%s", remote_url_https, commit_hash)
 
     dx.open_url(commit_url)
@@ -51,7 +51,7 @@ function M.open_git_commit_line()
     local remote_url = git.get_remote_origin()
     assert(remote_url and #remote_url > 0, "Failed to get remote origin")
 
-    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local remote_url_https = git.convert_remote_to_https(remote_url)
 
     local line_url = string.format("%s/-/blob/%s/%s#L%d", remote_url_https, commit_hash, relative_file_path, line_number)
 
@@ -60,28 +60,16 @@ end
 
 --- Opens the Git repository pipelines page
 function M.open_git_pipelines()
-    local remote_url = git.get_remote_origin()
-    assert(remote_url and #remote_url > 0, "Failed to get remote origin")
-
-    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local remote_url = assert(git.get_remote_origin())
+    local remote_url_https = git.convert_remote_to_https(remote_url)
     local pipelines_url = string.format("%s/-/pipelines", remote_url_https)
-
     dx.open_url(pipelines_url)
 end
 
 function M.open_gitlab_mr()
-    -- Get the current branch
-    local current_branch = git.get_current_branch()
-
-    -- Get the remote origin URL
-    local remote_url = git.get_remote_origin()
-
-    if not current_branch or not remote_url then
-        error("Failed to get branch or remote URL")
-        return
-    end
-
-    local remote_url_https = git.convert_origin_to_https(remote_url)
+    local current_branch = assert(git.get_current_branch())
+    local remote_url = assert(git.get_remote_origin())
+    local remote_url_https = git.convert_remote_to_https(remote_url)
 
     local mr_url = remote_url_https .. "/-/merge_requests/new?merge_request%5Bsource_branch%5D=" .. current_branch
 

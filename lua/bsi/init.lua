@@ -167,7 +167,7 @@ autocmd("LspAttach", {
 
         opts.desc = "Go to declaration"
         keymap.set("n", "gD", function()
-            vim.lsp.buf.declaration({ on_list = on_list })
+            vim.lsp.buf.declaration()
         end, opts) -- go to declaration
 
         opts.desc = "Show LSP definitions"

@@ -38,22 +38,21 @@ function M.get_repo_root()
     return output:gsub('%s+', '')
 end
 
---- @return string | nil
 function M.get_current_branch()
     local output = vim.fn.system { 'git', 'rev-parse', '--abbrev-ref', 'HEAD' }
     local error = vim.v.shell_error
     if error ~= 0 then
-        print(output)
-        return nil
+        return nil, output
+    else
+        return output:gsub('%s+', ''), nil
     end
-    return output:gsub('%s+', '')
 end
 
 function M.get_remote_origin()
     return M.get_remote_url("origin")
 end
 
-function M.convert_origin_to_https(ssh_or_https)
+function M.convert_remote_to_https(ssh_or_https)
     -- Convert SSH/HTTPS Git URL to GitLab URL
     local remote_url = ssh_or_https:gsub("%.git$", "")          -- Remove .git suffix
     remote_url = remote_url:gsub("git@([^:]+):", "https://%1/") -- Convert SSH to HTTPS
@@ -64,10 +63,10 @@ function M.get_remote_url(remote)
     local output = vim.fn.system { 'git', 'remote', 'get-url', remote }
     local error = vim.v.shell_error
     if error ~= 0 then
-        print(output)
-        return nil
+        return nil, output
+    else
+        return output:gsub('%s+', ''), nil
     end
-    return output:gsub('%s+', '')
 end
 
 --- @param url string
@@ -80,6 +79,16 @@ function M.get_gitlab_project_name()
     assert(git_origin ~= "", "Not found git origin")
 
     return M.convert_origin_to_project_name(git_origin)
+end
+
+function M.get_git_provider()
+    local remote_url = assert(M.get_remote_origin())
+    if string.find(remote_url, "gitlab") then
+        return "gitlab"
+    elseif string.find(remote_url, "github") then
+        return "github"
+    end
+    return nil
 end
 
 return M

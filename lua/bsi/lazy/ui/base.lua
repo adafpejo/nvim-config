@@ -36,7 +36,7 @@ return {
                     enable = false,
                 },
                 view = {
-                    width = 40,
+                    width = 30,
                 },
                 git = {
                     enable = true,
@@ -74,45 +74,6 @@ return {
             vim.keymap.set("n", "<leader>ee", function()
                 nt_api.tree.toggle({ find_file = true })
             end, { desc = "NvimTreeToggle" })
-        end,
-    },
-    {
-        "akinsho/bufferline.nvim",
-        enabled = false,
-        dependencies = { "nvim-tree/nvim-web-devicons" },
-        version = "*",
-        keys = {
-            { "<leader>bp", "<Cmd>BufferLineTogglePin<CR>",            desc = "Toggle pin" },
-            { "<leader>bP", "<Cmd>BufferLineGroupClose ungrouped<CR>", desc = "Delete non-pinned buffers" },
-            { "<leader>bo", "<Cmd>BufferLineCloseOthers<CR>",          desc = "Delete other buffers" },
-            { "<leader>br", "<Cmd>BufferLineCloseRight<CR>",           desc = "Delete buffers to the right" },
-            { "<leader>bl", "<Cmd>BufferLineCloseLeft<CR>",            desc = "Delete buffers to the left" },
-            { "<leader>bd", "<Cmd>:bp|bd#<CR>",                        desc = "Close current buffer" },
-            { "<S-h>",      "<cmd>BufferLineCyclePrev<cr>",            desc = "Prev buffer" },
-            { "<S-l>",      "<cmd>BufferLineCycleNext<cr>",            desc = "Next buffer" },
-            { "[b",         "<cmd>BufferLineCyclePrev<cr>",            desc = "Prev buffer" },
-            { "]b",         "<cmd>BufferLineCycleNext<cr>",            desc = "Next buffer" },
-        },
-        config = function()
-            require("bufferline").setup({
-                options = {
-                    -- stylua: ignore
-                    close_command = function(n) require("mini.bufremove").delete(n, false) end,
-                    -- stylua: ignore
-                    right_mouse_command = function(n) require("mini.bufremove").delete(n, false) end,
-                    diagnostics = "nvim_lsp",
-                    enforce_regular_tabs = true,
-                    always_show_bufferline = true,
-                    auto_toggle_bufferline = true,
-                    offsets = {
-                        {
-                            filetype = "NvimTree",
-                            text = "File Explorer",
-                            text_align = "center",
-                        },
-                    },
-                },
-            })
         end,
     },
 }
