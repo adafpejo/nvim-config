@@ -1,2 +1,6 @@
--- bootstrap lazy.nvim, LazyVim and your plugins
+require("core.mason-path")
+require("core.mason-verify")
+require("core.set")
+require("core.lazy")
+require("core.lsp")
 require("bsi")

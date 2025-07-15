@@ -3,6 +3,9 @@
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
 
+vim.g.loaded_netrw = 1                                  -- disable netrw
+vim.g.loaded_netrwPlugin = 1                            --  disable netrw
+
 -- cursor change on insert mode
 vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
 
@@ -41,6 +44,7 @@ vim.opt.isfname:append("@-@")
 vim.opt.updatetime = 50
 
 vim.opt.colorcolumn = "80"
+vim.opt.fillchars = { eob = " " } -- change the character at the end of buffer
 
 -- The unnamedplus option makes nvim use the system clipboard for all yank, delete, and put operations that would normally go to the unnamed register.
 vim.opt.clipboard = "unnamedplus"

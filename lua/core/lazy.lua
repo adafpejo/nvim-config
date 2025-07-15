@@ -13,8 +13,8 @@ vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({
     spec = {
-        { import = "bsi.lazy" },
-        { import = "bsi.lazy.ui" },
+        { import = "plugins" },
+        { import = "plugins.ui" },
     },
     defaults = {
         lazy = false,

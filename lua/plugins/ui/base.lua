@@ -51,7 +51,7 @@ return {
                     icons = {
                         glyphs = {
                             git = {
-                                untracked = "[?]",
+                                untracked = "?",
                                 ignored = "",
                             },
                         },

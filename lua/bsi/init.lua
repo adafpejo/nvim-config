@@ -1,5 +1,3 @@
-require("bsi.set")
-require("bsi.lazy_init")
 require("bsi.postload")
 require("bsi.remap")
 require("bsi.refactoring")
@@ -34,6 +32,11 @@ autocmd("BufWritePre", {
     group = bsiGroup,
     callback = function()
         vim.cmd("silent! EslintFixAll")
+    end,
+})
+autocmd("FileType", {
+    callback = function()
+        pcall(vim.treesitter.start)
     end,
 })
 
@@ -155,70 +158,58 @@ for _, group in ipairs(vim.fn.getcompletion("@lsp", "highlight")) do
     vim.api.nvim_set_hl(0, group, {})
 end
 
-local keymap = vim.keymap -- for conciseness
-autocmd("LspAttach", {
-    group = bsiGroup,
-    callback = function(e)
-        local opts = { noremap = true, silent = true, buffer = e.buf }
+vim.api.nvim_create_autocmd("LspAttach", {
+    group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
+    callback = function(event)
+        local map = function(keys, func, desc)
+            vim.keymap.set("n", keys, func, { buffer = event.buf, desc = "LSP: " .. desc })
+        end
 
-        -- set keybinds
-        opts.desc = "Show LSP references"
-        keymap.set("n", "gr", "<cmd>Telescope lsp_references<CR>", opts) -- show definition, references
+        map("gl", vim.diagnostic.open_float, "Open Diagnostic Float")
+        map("D", vim.lsp.buf.hover, "Hover Documentation")
+        map("gs", vim.lsp.buf.signature_help, "Signature Documentation")
+        map("gD", vim.lsp.buf.declaration, "Goto Declaration")
+        map("<leader>v", "<cmd>vsplit | lua vim.lsp.buf.definition()<cr>", "Goto Definition in Vertical Split")
 
-        opts.desc = "Go to declaration"
-        keymap.set("n", "gD", function()
-            vim.lsp.buf.declaration()
-        end, opts) -- go to declaration
+        local function client_supports_method(client, method, bufnr)
+            if vim.fn.has 'nvim-0.11' == 1 then
+                return client:supports_method(method, bufnr)
+            else
+                return client.supports_method(method, { bufnr = bufnr })
+            end
+        end
 
-        opts.desc = "Show LSP definitions"
-        keymap.set("n", "gd", function()
-            require("telescope.builtin").lsp_definitions()
-            -- vim.lsp.buf.definition()
-        end, opts) -- show lsp definitions
-
-        opts.desc = "Show LSP implementations"
-        keymap.set("n", "gi", "<cmd>Telescope lsp_implementations<CR>", opts) -- show lsp implementations
-
-        opts.desc = "Show LSP type definitions"
-        keymap.set("n", "gt", "<cmd>Telescope lsp_type_definitions<CR>", opts) -- show lsp type definitions
-
-        opts.desc = "See available code actions"
-        keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, opts) -- see available code actions, in visual mode will apply to selection
-
-        opts.desc = "See all current buf actions"
-        keymap.set("n", "<leader>cA", function()
-            vim.lsp.buf.code_action({
-                context = {
-                    only = {
-                        "source",
-                    },
-                    diagnostics = {},
-                },
+        local client = vim.lsp.get_client_by_id(event.data.client_id)
+        if client and client_supports_method(client, vim.lsp.protocol.Methods.textDocument_documentHighlight, event.buf) then
+            local highlight_augroup = vim.api.nvim_create_augroup('lsp-highlight', { clear = false })
+            vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
+                buffer = event.buf,
+                group = highlight_augroup,
+                callback = vim.lsp.buf.document_highlight,
             })
-        end, opts)
 
-        opts.desc = "Smart rename"
-        keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts) -- smart rename
+            vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+                buffer = event.buf,
+                group = highlight_augroup,
+                callback = vim.lsp.buf.clear_references,
+            })
 
-        opts.desc = "Show buffer diagnostics"
-        keymap.set("n", "<leader>D", "<cmd>Telescope diagnostics bufnr=0<CR>", opts) -- show  diagnostics for file
+            vim.api.nvim_create_autocmd('LspDetach', {
+                group = vim.api.nvim_create_augroup('lsp-detach', { clear = true }),
+                callback = function(event2)
+                    vim.lsp.buf.clear_references()
+                    vim.api.nvim_clear_autocmds { group = 'lsp-highlight', buffer = event2.buf }
+                end,
+            })
+        end
 
-        -- show diagnostics for line
-        opts.desc = "Show line diagnostics"
-        keymap.set("n", "<leader>d", function()
-            vim.diagnostic.open_float({ focusable = true })
-        end, opts)
 
-        opts.desc = "Go to previous diagnostic"
-        keymap.set("n", "[d", vim.diagnostic.goto_prev, opts) -- jump to previous diagnostic in buffer
-
-        opts.desc = "Go to next diagnostic"
-        keymap.set("n", "]d", vim.diagnostic.goto_next, opts) -- jump to next diagnostic in buffer
-
-        opts.desc = "Show documentation for what is under cursor"
-        keymap.set("n", "D", vim.lsp.buf.hover, opts) -- show documentation for what is under cursor
-
-        opts.desc = "Restart LSP"
-        keymap.set("n", "<leader>rs", ":LspRestart<CR>", opts)
+        if client and client_supports_method(client, vim.lsp.protocol.Methods.textDocument_inlayHint, event.buf) then
+            map('<leader>th', function()
+                vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })
+            end, '[T]oggle Inlay [H]ints')
+        end
     end,
+
 })
+
