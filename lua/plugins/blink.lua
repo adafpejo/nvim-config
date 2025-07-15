@@ -51,13 +51,17 @@ return {
                     },
                 },
                 keymap = {
-                    ["<C-f>"] = {},
+                    ["<C-CR>"] = { "accept", 'fallback' },
+                    ["<C-j>"] = { "select_next" },
+                    ["<C-k>"] = { "select_prev" },
                 },
                 cmdline = {
                     enabled = false,
                     completion = { menu = { auto_show = true } },
                     keymap = {
-                        ["<CR>"] = { "accept_and_enter", "fallback" },
+                        ["<C-CR>"] = { "accept_and_enter", "fallback" },
+                        ["<C-j>"] = { "select_next" },
+                        ["<C-k>"] = { "select_prev" },
                     },
                 },
                 completion = {

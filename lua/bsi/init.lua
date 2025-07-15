@@ -169,6 +169,12 @@ vim.api.nvim_create_autocmd("LspAttach", {
         map("D", vim.lsp.buf.hover, "Hover Documentation")
         map("gs", vim.lsp.buf.signature_help, "Signature Documentation")
         map("gD", vim.lsp.buf.declaration, "Goto Declaration")
+        map("gd", vim.lsp.buf.definition, "Goto definition")
+        map("gr", function()
+            require('telescope.builtin').lsp_references({ file_ignore_patterns = { "node_modules" } })
+        end, "Goto references")
+
+
         map("<leader>v", "<cmd>vsplit | lua vim.lsp.buf.definition()<cr>", "Goto Definition in Vertical Split")
 
         local function client_supports_method(client, method, bufnr)
@@ -212,4 +218,3 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end,
 
 })
-
