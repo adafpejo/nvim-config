@@ -25,7 +25,7 @@ function M.verify_tools()
     local mason_tools = {
         -- LSP Servers (Mason-managed)
         "gopls", "lua-language-server", "rust-analyzer",
-        "typescript-language-server", "intelephense", "zls",
+        "typescript-language-server", "phpactor", "zls",
 
         -- Formatters (Mason-managed)
         "stylua", "prettier", "goimports", "black", "isort", "shfmt", "pint",

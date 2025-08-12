@@ -19,6 +19,8 @@ return {
                 "intelephense",                -- PHP LSP
                 "tailwindcss-language-server", -- Tailwind CSS LSP
 
+                "phpactor",                -- PHP LSP
+
                 -- Formatters (for conform.nvim and general use)
                 "stylua",
                 "goimports",
@@ -47,9 +49,9 @@ return {
                 -- -- "graphql",
                 -- -- "emmet_ls",
                 -- "pyright",
-                -- "jdtls",
-                -- "java_language_server",
-                -- "kotlin_language_server",
+
+                "jdtls",
+                "groovy-language-server",
             },
         },
         config = function(_, opts)

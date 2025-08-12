@@ -1,6 +1,8 @@
 local blink = require("blink.cmp")
 return {
-    cmd = { 'gopls' },
+    cmd = {
+        vim.fn.expand("~/.local/share/nvim/mason/bin/gopls")
+    },
     filetypes = { 'go', 'gomod', 'gowork', 'gotmpl', 'gosum' },
     root_markers = { 'go.mod', 'go.work', '.git' },
     settings = {

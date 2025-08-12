@@ -41,7 +41,7 @@ end
 
 local function get_url(with_line)
     local remote = assert(git.get_remote_origin())
-    local remote_url = git.convert_origin_to_https(remote)
+    local remote_url = git.convert_remote_to_https(remote)
     local base, user, repo = split_remote_url(remote_url)
     if not base then
         return nil

@@ -1,7 +1,10 @@
 local blink = require("blink.cmp")
 
 return {
-    cmd = { "typescript-language-server", "--stdio" },
+    cmd = {
+        vim.fn.expand("~/.local/share/nvim/mason/bin/typescript-language-server"),
+        "--stdio"
+    },
     filetypes = {
         "javascript",
         "javascriptreact",

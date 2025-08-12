@@ -1,6 +1,6 @@
 local blink = require("blink.cmp")
 return {
-    cmd = { "lua-language-server" },
+    cmd = { vim.fn.expand("~/.local/share/nvim/mason/bin/lua-language-server"), },
     filetypes = { "lua" },
     root_markers = {
         '.luarc.json',
