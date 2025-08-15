@@ -1,3 +1,4 @@
+local dx = require "bsi.dx"
 return {
     { "rcarriga/nvim-notify" },
     {
@@ -74,13 +75,13 @@ return {
                     end
 
                     -- Open with system default app (Finder, browser, PDF viewer, etc.)
-                    map("oB", function()
+                    map("o", function()
                         local node = api.tree.get_node_under_cursor()
-                        if node then open_with_system(node) end
+                        if node then dx.open_url(node.absolute_path) end
                     end, "Open with System (Browser/Finder)")
 
                     -- macOS: “Reveal in Finder”
-                    map("oF", function()
+                    map("of", function()
                         local node = api.tree.get_node_under_cursor()
                         if not node then return end
                         if vim.loop.os_uname().sysname == "Darwin" then
@@ -88,7 +89,7 @@ return {
                             vim.fn.jobstart({ "open", "-R", node.absolute_path }, { detach = true })
                         else
                             -- Fallback: just open with system handler on non-macOS
-                            open_with_system(node)
+                            dx.open_url(node.absolute_path)
                         end
                     end, "Reveal in Finder")
                 end,

@@ -21,6 +21,16 @@ local autocmd = vim.api.nvim_create_autocmd
 
 local bsiGroup = augroup("bsi")
 
+-- avoid new comment
+vim.api.nvim_create_autocmd("FileType", {
+    group = bsiGroup,
+    pattern = "*",
+    callback = function()
+        vim.opt_local.formatoptions:remove({ 'r', 'o' })
+        vim.opt.eol = true
+        vim.opt.fixeol = true
+    end,
+})
 -- lint/format buffer before save
 autocmd("BufWritePre", {
     group = bsiGroup,
@@ -158,4 +168,3 @@ vim.cmd("hi NvimTreeGitFolderIgnoredHL guifg=gray")
 for _, group in ipairs(vim.fn.getcompletion("@lsp", "highlight")) do
     vim.api.nvim_set_hl(0, group, {})
 end
-
