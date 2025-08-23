@@ -10,6 +10,7 @@ return {
                 "lua-language-server",         -- Lua LSP
                 "gopls",                       -- Go LSP
                 "zls",                         -- Zig LSP
+                "astro-language-server",       -- Astro LSP
 
                 "typescript-language-server",  -- TypeScript LSP
                 "html-lsp",                    -- HTML LSP

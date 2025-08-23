@@ -1,3 +1,4 @@
+require("bsi.tail-file")
 require("bsi.postload")
 require("bsi.remap")
 require("bsi.refactoring")

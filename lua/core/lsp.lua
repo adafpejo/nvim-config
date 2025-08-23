@@ -1,4 +1,5 @@
 vim.lsp.enable({
+    "astro",
     "ts-ls",
     "gopls",
     "html-ls",

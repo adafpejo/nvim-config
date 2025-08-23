@@ -16,6 +16,18 @@ function M.has_value(table, val)
     return false
 end
 
+-- Composing multiple functions
+function M.compose(...)
+  local fnchain = { ... }
+  return function(...)
+    local args = { ... }
+    for _, fn in ipairs(fnchain) do
+      args = { fn(table.unpack(args)) }
+    end
+    return table.unpack(args)
+  end
+end
+
 --- @param t table
 --- @return table
 function M.table_keys(t)

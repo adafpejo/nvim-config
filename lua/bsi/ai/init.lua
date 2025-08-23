@@ -160,7 +160,10 @@ local function list_options_picker(visual_selection)
                     timeout = 100
                 })
 
-                M.ask_llm(prompts.prompt_map[item.text](visual_selection))
+                local ok, err = pcall(M.ask_llm, prompts.prompt_map[item.text](visual_selection))
+                if not ok then
+                    vim.notify_popup(err, "error")
+                end
             end)
             if not status then
                 vim.notify("corutine error: " .. result)
