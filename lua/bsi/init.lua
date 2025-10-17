@@ -1,7 +1,9 @@
 require("bsi.tail-file")
 require("bsi.postload")
 require("bsi.remap")
+require("bsi.notes")
 require("bsi.refactoring")
+local nt_api      = require("nvim-tree.api")
 
 local nvim = require("bsi.utils.nvim")
 
@@ -22,6 +24,12 @@ local autocmd = vim.api.nvim_create_autocmd
 
 local bsiGroup = augroup("bsi")
 
+vim.api.nvim_create_autocmd({"VimEnter"}, {
+    group = bsiGroup,
+    callback = function()
+        nt_api.tree.open({ update_root = true })
+    end
+})
 -- avoid new comment
 vim.api.nvim_create_autocmd("FileType", {
     group = bsiGroup,

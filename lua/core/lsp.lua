@@ -1,5 +1,6 @@
 vim.lsp.enable({
-    "astro",
+    -- "astro",
+    "rust_analyzer",
     "ts-ls",
     "gopls",
     "html-ls",
@@ -9,6 +10,16 @@ vim.lsp.enable({
     "jdtls",
     "pyright",
     "groovyls",
+    "xcrun",
+})
+vim.lsp.config('rust_analyzer', {
+   settings = {
+     ['rust-analyzer'] = {
+       diagnostics = {
+         enable = false;
+       }
+     }
+   }
 })
 
 vim.diagnostic.config({

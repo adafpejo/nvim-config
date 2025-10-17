@@ -101,6 +101,23 @@ function M.ask_v()
     end
 end
 
+function M.ask_goose()
+    local status, result = async.run(function()
+        local instruction = ide.open_inline_input()
+        local buffer_path = nvim.get_buffer_file_path()
+
+        local prompt = string.format("%s\n%s\n", instruction, buffer_path)
+        vim.notify_popup(prompt, "info", {
+            timeout = 100
+        })
+
+        vim.system({"goose -t" .. " " .. prompt})
+    end)
+    if not status then
+        vim.notify("corutine error: " .. result)
+    end
+end
+
 function M.ask()
     local status, result = async.run(function()
         local instruction = ide.open_inline_input()

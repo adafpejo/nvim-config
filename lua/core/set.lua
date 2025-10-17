@@ -29,7 +29,7 @@ vim.opt.wrapmargin = 0
 vim.opt.eol = true
 vim.opt.fixeol = true
 
-vim.opt.swapfile = false
+-- vim.opt.swapfile = false
 vim.opt.backup = false
 vim.opt.undodir = os.getenv("HOME") .. "/.vim/undodir"
 vim.opt.undofile = true

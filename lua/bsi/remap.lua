@@ -154,7 +154,7 @@ vim.keymap.set("v", "<leader>lC", function()
     ai.ask_comment()
 end, { noremap = true, desc = ":Lazy" })
 vim.keymap.set("n", "<leader>la", function()
-    ai.ask()
+    ai.ask_goose()
 end, { noremap = true, desc = ":Lazy" })
 vim.keymap.set("v", "<leader>la", function()
     ai.ask_v()
@@ -162,6 +162,8 @@ end, { noremap = true, desc = ":Lazy" })
 
 -- Lazygit
 vim.keymap.set("n", "<leader>gg", "<cmd>LazyGit<cr>", { noremap = true, desc = "Open lazygit" })
+-- Lazydocker
+vim.keymap.set("n", "<leader>dd", "<cmd>LazyDocker<cr>", { noremap = true, desc = "Open lazydocker" })
 
 -- Gen.nvim
 vim.keymap.set({ "n", "v" }, "<leader>]", ":Gen<CR>")
