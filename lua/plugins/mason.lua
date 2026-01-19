@@ -52,6 +52,7 @@ return {
                 -- "pyright",
 
                 "jdtls",
+                "kotlin_language_server",
                 "groovy-language-server",
             },
         },

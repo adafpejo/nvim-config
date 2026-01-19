@@ -1,15 +1,29 @@
 vim.lsp.enable({
+    -- "json"
+    "jsonls",
     -- "astro",
     "rust_analyzer",
+
+    -- web
     "ts-ls",
-    "gopls",
     "html-ls",
     "css-ls",
+
+    -- go
+    "gopls",
+
+    -- lua
     "lua-ls",
+
+    -- php
     "phpactor",
+
+    -- java
     "jdtls",
-    "pyright",
+    "kotlin-language-server",
     "groovyls",
+
+    "pyright",
     "xcrun",
 })
 vim.lsp.config('rust_analyzer', {

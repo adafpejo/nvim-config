@@ -4,6 +4,9 @@ return {
         local gitsigns = require('gitsigns')
         gitsigns.setup()
 
+        -- toogle blame by default
+        gitsigns.toggle_current_line_blame()
+
         vim.keymap.set('n', '<leader>hs', gitsigns.stage_hunk)
         vim.keymap.set('n', '<leader>hr', gitsigns.reset_hunk)
         vim.keymap.set('v', '<leader>hs', function() gitsigns.stage_hunk {vim.fn.line('.'), vim.fn.line('v')} end)

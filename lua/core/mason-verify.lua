@@ -28,6 +28,10 @@ function M.verify_tools()
         "astro-ls",
         "typescript-language-server", "phpactor", "zls",
 
+        -- java
+        "jdtls",
+        "kotlin_language_server",
+
         -- Formatters (Mason-managed)
         "stylua", "prettier", "goimports", "black", "isort", "shfmt", "pint",
 

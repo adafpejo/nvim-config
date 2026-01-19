@@ -95,6 +95,7 @@ return {
             staticcheck = true,
             directoryFilters = { "-.git", "-.vscode", "-.idea", "-.vscode-test", "-node_modules" },
             semanticTokens = false,
+            buildFlags = { "-tags=test,integration" },
         },
     },
     capabilities = vim.tbl_deep_extend(

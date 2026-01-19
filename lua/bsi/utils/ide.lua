@@ -36,15 +36,18 @@ function M.open_git_commit()
 end
 
 --- Opens the current file at the current line in the Git repository web interface
-function M.open_git_commit_line()
-    local commit_hash = git.get_current_commit_hash()
-    assert(commit_hash and #commit_hash > 0, "Failed to get current commit hash")
-
+function M.open_git_commit_blame()
     local file_path = nvim.get_file_path()
     local line_number = nvim.get_cursor_line_number()
 
     local repo_root = git.get_repo_root()
     assert(repo_root and #repo_root > 0, "Failed to get repo root")
+
+    -- Ensure file is tracked in git
+    assert(git.is_file_tracked(file_path), "File is not tracked in git")
+
+    local commit_hash = git.get_blame_commit_hash(file_path, line_number)
+    assert(commit_hash and #commit_hash > 0, "Failed to get blame commit hash")
 
     local relative_file_path = file_path:gsub('^' .. repo_root .. '/', '')
 
@@ -53,6 +56,7 @@ function M.open_git_commit_line()
 
     local remote_url_https = git.convert_remote_to_https(remote_url)
 
+    -- Assuming GitLab or similar; adjust for GitHub if needed
     local line_url = string.format("%s/-/blob/%s/%s#L%d", remote_url_https, commit_hash, relative_file_path, line_number)
 
     dx.open_url(line_url)

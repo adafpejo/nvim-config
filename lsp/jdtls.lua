@@ -41,6 +41,8 @@ local env = {
     JDTLS_JVM_ARGS = os.getenv 'JDTLS_JVM_ARGS',
 }
 
+local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ':p:h:t')
+
 local function get_cache_dir()
     return env.XDG_CACHE_HOME and env.XDG_CACHE_HOME or env.HOME .. '/.cache'
 end
@@ -54,7 +56,7 @@ local function get_jdtls_config_dir()
 end
 
 local function get_jdtls_workspace_dir()
-    return get_jdtls_cache_dir() .. '/workspace'
+    return get_jdtls_cache_dir() .. '/workspace' .. project_name
 end
 
 local function to_jvm_args(src)
@@ -140,8 +142,8 @@ return {
         string.format("--jvm-arg=%s", '-Dlog.level=ALL'),
         string.format("--jvm-arg=%s", '-Xmx1g'),
         string.format("--jvm-arg=%s", '--add-modules=ALL-SYSTEM'),
-        string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.util=ALL-UNNAMED'),
-        string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.lang=ALL-UNNAMED'),
+        -- string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.util=ALL-UNNAMED'),
+        -- string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.lang=ALL-UNNAMED'),
         string.format("--jvm-arg=%s", '-javaagent:' .. lombok_jar),
     },
     -- cmd = {
@@ -161,7 +163,7 @@ return {
     --     '-configuration' .. mac_conifg,
     --     '-data' .. get_jdtls_workspace_dir(),
     -- },
-    filetypes = { 'java' },
+    filetypes = { 'java', 'kotlin' },
     root_markers = {
         -- Multi-module projects
         '.git',
@@ -174,14 +176,11 @@ return {
         'settings.gradle.kts', -- Gradle
     },
     init_options = {
-        workspace = get_jdtls_workspace_dir(),
-        jvm_args = {},
-        bundlers = {},
-        os_config = nil,
+        extendedClientCapabilities = require("jdtls.capabilities")
     },
     settings = {
         java = {
-            rename = {enabled = true},
+            rename = { enabled = true },
             references = { includeDecompiledSources = true },
             import = {
                 enabled = true,
@@ -212,17 +211,18 @@ return {
                     },
                     {
                         name = "JavaSE-21",
-                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/21.0.8-tem",
+                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/21.0.9-tem",
                     },
                     {
                         name = "JavaSE-17",
-                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/17.0.16-tem",
+                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/17.0.17-tem",
                     },
                 },
             },
             project = {
                 referencedLibraries = {
                     "lib/**/*.jar",
+                    lombok_jar,
                 },
             },
         },

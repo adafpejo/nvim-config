@@ -8,7 +8,8 @@ return {
         dependencies = {
             {
                 "nvim-telescope/telescope-fzf-native.nvim", -- https://github.com/nvim-telescope/telescope-fzf-native.nvim
-                build = "cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release && cmake --install build --prefix build",
+                build =
+                "cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release && cmake --install build --prefix build",
             },
             "nvim-telescope/telescope-live-grep-args.nvim", -- https://github.com/nvim-telescope/telescope-live-grep-args.nvim
             {
@@ -20,9 +21,9 @@ return {
                             "go.mod",
                         },
                         base_dirs = {
-                            { "~/_git", max_depth = 3 },
+                            { "~/_git",    max_depth = 3 },
                             { "~/_semhub", max_depth = 3 },
-                            { "~/_my", max_depth = 3 },
+                            { "~/_my",     max_depth = 3 },
                         },
                     })
                 end,
@@ -65,6 +66,17 @@ return {
                         "--smart-case",
                         "--hidden",
                     },
+                    layout_strategy = "flex",
+                    layout_config = {
+                      horizontal = {
+                        preview_width = 0.5,
+                      },
+                      vertical = {
+                        preview_height = 0.5,
+                      },
+                      width = 0.99,
+                      height = 0.99,
+                    },
                 },
             })
             -- set keymaps
@@ -73,7 +85,8 @@ return {
             keymap.set("n", "<leader>fr", "<cmd>Telescope oldfiles<cr>", { desc = "Fuzzy find recent files" })
             keymap.set("n", "<leader>fs", "<cmd>Telescope live_grep<cr>", { desc = "Find string in cwd" })
             keymap.set("n", "<leader>p", "<cmd>Telescope projects<cr>", { desc = "Projects list" })
-            keymap.set("n", "<leader>fg", ":lua require('telescope').extensions.live_grep_args.live_grep_args()<CR>", { desc = "Find string in cwd" })
+            keymap.set("n", "<leader>fg", ":lua require('telescope').extensions.live_grep_args.live_grep_args()<CR>",
+                { desc = "Find string in cwd" })
             keymap.set("n", "<leader>fw", function()
                 local word = nvim.get_cursor_word()
 

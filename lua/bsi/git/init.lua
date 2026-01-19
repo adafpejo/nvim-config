@@ -91,4 +91,22 @@ function M.get_git_provider()
     return nil
 end
 
+-- Assuming git module has or needs these helpers:
+-- git.get_blame_commit_hash(file_path, line_number)
+-- Implementation example (add to git.lua or similar):
+function M.get_blame_commit_hash(file_path, line_number)
+    local cmd = string.format('git blame -L %d,%d --porcelain "%s"', line_number, line_number, vim.fn.fnameescape(file_path))
+    local output = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 then return nil end
+    -- Parse the first line for the commit hash (e.g., "da39a3e Committer...")
+    local first_line = output:match("([0-9a-f]+)")
+    return first_line
+end
+
+function M.is_file_tracked(file_path)
+    local cmd = string.format('git ls-files --error-unmatch "%s"', vim.fn.fnameescape(file_path))
+    local output = vim.fn.system(cmd)
+    return vim.v.shell_error == 0
+end
+
 return M

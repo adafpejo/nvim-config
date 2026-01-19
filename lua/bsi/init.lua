@@ -59,6 +59,14 @@ autocmd("FileType", {
     end,
 })
 
+-- swap file pre choice
+autocmd("SwapExists", {
+  callback = function()
+    vim.v.swapchoice = "e"  -- "e" = edit anyway (use with caution)
+    -- Or "d" to delete swap, "r" to recover, "q" to quit
+  end,
+})
+
 -- autocmd({ "FileType" }, {
 --     pattern = { "json", "jsonc", "json5", "markdown" },
 --     callback = function()
