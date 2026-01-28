@@ -18,6 +18,43 @@ function M.get_remotes()
     return split_string(output)
 end
 
+function M.get_base_commit()
+    local output = vim.fn.system { 'git', 'symbolic-ref', 'refs/remotes/origin/HEAD' }
+    local error = vim.v.shell_error
+    local default_ref = nil
+    if error == 0 then
+        default_ref = output:gsub('%s+', ''):gsub('^refs/remotes/origin/', 'origin/')
+    end
+
+    local candidates = {}
+    if default_ref and default_ref ~= '' then
+        table.insert(candidates, default_ref)
+    end
+    for _, ref in ipairs({ 'origin/main', 'origin/master', 'main', 'master' }) do
+        table.insert(candidates, ref)
+    end
+
+    local base_ref = nil
+    for _, ref in ipairs(candidates) do
+        local check = vim.fn.system { 'git', 'rev-parse', '--verify', ref }
+        if vim.v.shell_error == 0 then
+            base_ref = ref
+            break
+        end
+    end
+
+    if not base_ref then
+        return nil
+    end
+
+    local merge_base = vim.fn.system { 'git', 'merge-base', 'HEAD', base_ref }
+    if vim.v.shell_error ~= 0 then
+        print(merge_base)
+        return nil
+    end
+    return merge_base:gsub('%s+', '')
+end
+
 function M.get_current_commit_hash()
     local output = vim.fn.system { 'git', 'rev-parse', 'HEAD' }
     local error = vim.v.shell_error

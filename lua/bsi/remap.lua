@@ -7,6 +7,7 @@ local webify      = require("bsi.webify")
 local ide         = require("bsi.utils.ide")
 local fastgit     = require("bsi.fastgit")
 local multigrep   = require("bsi.multigrep")
+local rglist     = require("bsi.rglist")
 
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
@@ -175,6 +176,7 @@ vim.keymap.set({ "v" }, "<leader>h", dx.highlight_visual, { noremap = true, desc
 -- Telescope
 vim.keymap.set({ "n" }, "fs", multigrep.live_multigrep, { noremap = true, desc = "Search word in current root" })
 vim.api.nvim_create_user_command("TSC", multigrep.tsc_no_emit, {})
+vim.api.nvim_create_user_command("RgList", rglist.run, { nargs = "*" })
 
 -- Webify
 vim.keymap.set("n", "<leader>sw", function()
@@ -215,8 +217,7 @@ vim.keymap.set("n", "<leader>gr", ide.open_git_repo, { noremap = true })
 vim.keymap.set("n", "<leader>gc", ide.open_git_commit, { noremap = true })
 vim.keymap.set("n", "<leader>gC", ide.open_git_commit_blame, { noremap = true })
 vim.keymap.set("n", "<leader>gp", ide.open_git_pipelines, { noremap = true })
-vim.keymap.set("n", "<leader>gd", "<cmd>DiffviewFileHistory %<CR>", { noremap = true })
-vim.keymap.set("n", "<leader>gD", "<cmd>DiffviewOpen<cr>", { noremap = true })
+vim.keymap.set("n", "<leader>gD", "<cmd>DiffviewFileHistory %<CR>", { noremap = true })
 vim.keymap.set("n", "<leader>go", function()
     webify.open_file_in_browser()
 end, { desc = "Open in web browser" })

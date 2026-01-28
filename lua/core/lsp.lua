@@ -11,6 +11,7 @@ vim.lsp.enable({
 
     -- go
     "gopls",
+    -- "golangci-lint-langserver",
 
     -- lua
     "lua-ls",

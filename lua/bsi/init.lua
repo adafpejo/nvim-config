@@ -157,6 +157,7 @@ autocmd("FileType", {
         "dbout",
         "gitsigns.blame",
         "lazygit",
+        "gitsigns",
     },
     callback = function(event)
         vim.bo[event.buf].buflisted = false
