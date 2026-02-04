@@ -30,6 +30,40 @@ return {
 
             gitsigns.show_commit(commit_hash, 'tabnew')
         end)
+        vim.keymap.set('n', '<leader>gl', function()
+            local file_path = nvim.get_file_path()
+            local line_number = nvim.get_cursor_line_number()
+
+            local repo_root = git.get_repo_root()
+            assert(repo_root and #repo_root > 0, "Failed to get repo root")
+
+            -- Ensure file is tracked in git
+            assert(git.is_file_tracked(file_path), "File is not tracked in git")
+
+            local commits = git.get_current_line_commits(file_path, line_number)
+            if not commits or #commits == 0 then
+                vim.cmd("echo 'No commits found for this line'")
+                return
+            end
+
+            -- Show commits in a new buffer with keymaps
+            vim.cmd("enew")
+            vim.bo.buftype = "nofile"
+            vim.bo.bufhidden = "wipe"
+            vim.bo.swapfile = false
+            vim.api.nvim_buf_set_lines(0, 0, -1, false, commits)
+
+            -- Keymap to select commit on Enter
+            vim.keymap.set('n', '<CR>', function()
+                local line = vim.api.nvim_get_current_line()
+                local commit_hash = line:match("^(%S+)")
+                if commit_hash then
+                    gitsigns.show_commit(commit_hash, 'tabnew')
+                end
+            end, { buffer = true })
+
+            vim.cmd("wincmd L | vertical resize 50") -- Open as vertical split on the right, resize to 50 columns
+        end)
         vim.keymap.set('n', '<leader>gd', function()
             -- local commit_hash = git.get_current_commit_hash()
             -- assert(commit_hash and #commit_hash > 0, "Failed to get blame commit hash")

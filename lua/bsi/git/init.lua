@@ -146,4 +146,15 @@ function M.is_file_tracked(file_path)
     return vim.v.shell_error == 0
 end
 
+function M.get_current_line_commits(file_path, line_number)
+    local cmd = string.format('git log --oneline --follow -L %d,%d "%s"', line_number, line_number, file_path)
+    local output = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 then return nil end
+    local lines = {}
+    for s in output:gmatch("[^\r\n]+") do
+        table.insert(lines, s)
+    end
+    return lines
+end
+
 return M

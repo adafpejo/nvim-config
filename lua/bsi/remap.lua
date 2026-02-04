@@ -230,6 +230,37 @@ end, { desc = "yank_line_url" })
 vim.keymap.set('n', '<leader>gi', fastgit.open_gitlab_pipelines, { noremap = true, silent = true })
 ---
 
+--- dap keymap
+local dap = require('dap')
+
+dap.adapters.go = {
+  type = "server",
+  host = "127.0.0.1",
+  port = "38697",
+}
+
+dap.configurations.go = {
+  {
+    type = "go",
+    name = "Attach to headless",
+    request = "attach",
+    mode = "remote",
+  },
+}
+
+vim.keymap.set('n', '<F5>',  dap.continue)
+vim.keymap.set('n', '<F10>', dap.step_over)
+vim.keymap.set('n', '<F11>', dap.step_into)
+vim.keymap.set('n', '<S-F11>', dap.step_out)
+vim.keymap.set('n', '<F9>',  dap.toggle_breakpoint)
+vim.keymap.set('n', '<F12>', dap.terminate)
+
+vim.keymap.set('n', '<leader>db', dap.toggle_breakpoint)
+vim.keymap.set('n', '<leader>dc', function()
+  dap.set_breakpoint(vim.fn.input('Breakpoint condition: '))
+end)
+---
+
 vim.keymap.set("v", "<leader>s", function()
     local visual = nvim.get_visual_selection()
     dx.open_url(visual)
