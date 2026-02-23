@@ -121,6 +121,9 @@ vim.keymap.set("n", "<leader>F", function()
     vim.api.nvim_command("write")
 end, { noremap = true, silent = true })
 
+-- replace whole project
+vim.keymap.set("n", "<leader>fr", ":GrugFar<CR>", { noremap = true, desc = "GrugFar" })
+
 -- Save file
 vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { noremap = true, desc = "Save window" })
 vim.api.nvim_create_user_command("W", function(opts)

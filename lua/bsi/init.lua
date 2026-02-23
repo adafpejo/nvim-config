@@ -30,6 +30,7 @@ vim.api.nvim_create_autocmd({"VimEnter"}, {
     group = bsiGroup,
     callback = function()
         nt_api.tree.open({ update_root = true })
+        nt_api.tree.toggle()
     end
 })
 -- avoid new comment
