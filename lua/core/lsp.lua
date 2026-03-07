@@ -1,4 +1,5 @@
 vim.lsp.enable({
+    "yamlls",
     -- "json"
     "jsonls",
     -- "astro",
@@ -8,6 +9,7 @@ vim.lsp.enable({
     "ts-ls",
     "html-ls",
     "css-ls",
+    "jinja-lsp",
 
     -- go
     "gopls",
@@ -27,14 +29,36 @@ vim.lsp.enable({
     "pyright",
     "xcrun",
 })
+vim.lsp.config('yamlls', {
+    settings = {
+        yaml = {
+            schemas = {
+                -- Kubernetes schemas for helm templates
+                ["https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/schema-all.json"] = "templates/**/*.{yaml,yml}",
+                -- Schema store for other yaml files
+                schemastore = {
+                    enable = true,
+                    url = "https://www.schemastore.org/api/json/catalog.json",
+                },
+            },
+            -- Disable yamlls for specific filetypes
+            keyOrdering = false,
+            format = {
+                enabled = false,
+            },
+        },
+    },
+    filetypes = { "yaml", "yml" }, -- attach only to yaml files, not helm
+})
+
 vim.lsp.config('rust_analyzer', {
-   settings = {
-     ['rust-analyzer'] = {
-       diagnostics = {
-         enable = true;
-       }
-     }
-   }
+    settings = {
+      ['rust-analyzer'] = {
+        diagnostics = {
+          enable = true;
+        }
+      }
+    }
 })
 
 vim.diagnostic.config({

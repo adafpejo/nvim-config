@@ -40,7 +40,7 @@ return {
                 -- "rescriptls",
                 -- "helm_ls",
                 -- "jsonls",
-                -- "yamlls",
+                "yamlls",
                 -- "eslint@4.8.0",
                 -- "tailwindcss",
                 -- "svelte",

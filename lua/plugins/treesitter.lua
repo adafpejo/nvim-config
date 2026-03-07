@@ -43,6 +43,7 @@ return {
                     "html",
                     "http",
                     "ini",
+                    "jinja",
                     "java",
                     "javascript",
                     "jsdoc",

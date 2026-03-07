@@ -110,14 +110,7 @@ autocmd({ 'BufNewFile', 'BufRead' }, {
     end
 })
 
-autocmd({ "FileType" }, {
-    pattern = { "helm", "terraform" },
-    callback = function()
-        vim.schedule(function()
-            nvim.stop_lsp_byname("yamlls")
-        end)
-    end
-})
+
 
 autocmd({ "FileType" }, {
     pattern = { "helm" },
