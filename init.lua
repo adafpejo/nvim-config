@@ -93,7 +93,6 @@ require("core.mason-path")
 require("core.mason-verify")
 require("core.set")
 require("core.lsp")
-require("bsi")
 
 -- setup
 require("plugin.mason")
@@ -127,3 +126,6 @@ vim.keymap.set("n", "<leader>hn", ":lua require('harpoon.ui').nav_next()<CR>", {
 vim.keymap.set("n", "<leader>hp", ":lua require('harpoon.ui').nav_prev()<CR>", { desc = "Previous file" })
 vim.keymap.set("n", "<leader>ht", ":lua require('harpoon.term').gotoTerminal(1)<CR>", { desc = "Terminal" })
 
+vim.schedule(function()
+    require("bsi")
+end)
