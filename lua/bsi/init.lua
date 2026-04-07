@@ -12,7 +12,6 @@ require('notify').setup({
 })
 vim.notify_popup = require('notify')
 
-vim.cmd.colorscheme("tokyonight-night")
 
 -- Autocmds are automatically loaded on the VeryLazy event
 -- Default autocmds that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/autocmds.lua

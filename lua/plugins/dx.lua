@@ -1,44 +1,5 @@
 return {
     {
-        "folke/zen-mode.nvim",
-        keys = {
-            { "<leader>z", "<cmd>Zen<CR>", { desc = "Zen mod" } },
-        },
-    },
-    {
-        "rmagatti/auto-session",
-        enabled = false,
-        lazy = false,
-        dependencies = {
-            "nvim-telescope/telescope.nvim", -- Only needed if you want to use sesssion lens
-        },
-        config = function()
-            require("auto-session").setup({
-                auto_session_suppress_dirs = { "~/", "~/Projects", "~/Downloads", "/" },
-            })
-        end,
-    },
-    -- -- Create annotations with one keybind, and jump your cursor in the inserted annotation
-    -- {
-    --     "danymat/neogen",
-    --     keys = {
-    --         {
-    --             "<leader>cc",
-    --             function()
-    --                 require("neogen").generate({})
-    --             end,
-    --             desc = "Neogen Comment",
-    --         },
-    --     },
-    --     opts = { snippet_engine = "luasnip" },
-    -- },
-    {
-        "tpope/vim-surround",
-    },
-    {
-        "tpope/vim-commentary",
-    },
-    {
         "ThePrimeagen/harpoon",
         dependencies = {
             { "nvim-lua/plenary.nvim" },

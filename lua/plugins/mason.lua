@@ -40,7 +40,6 @@ return {
                 -- "rescriptls",
                 -- "helm_ls",
                 -- "jsonls",
-                "yamlls",
                 -- "eslint@4.8.0",
                 -- "tailwindcss",
                 -- "svelte",
@@ -52,7 +51,6 @@ return {
                 -- "pyright",
 
                 "jdtls",
-                "kotlin_language_server",
                 "groovy-language-server",
             },
         },
