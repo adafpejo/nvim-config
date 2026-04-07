@@ -1,39 +1,39 @@
 local gh = function(x) return 'https://github.com/' .. x end
 vim.pack.add({
-    "https://github.com/nvim-lua/plenary.nvim",          -- lua functions that many plugins use
-    "https://github.com/christoomey/vim-tmux-navigator", -- tmux & split window navigation
-    "https://github.com/MunifTanjim/nui.nvim",
-    'https://github.com/mfussenegger/nvim-jdtls',
-    "https://github.com/L3MON4D3/LuaSnip",
+    gh("nvim-lua/plenary.nvim"),          -- lua functions that many plugins use
+    gh("christoomey/vim-tmux-navigator"), -- tmux & split window navigation
+    gh("MunifTanjim/nui.nvim"),
+    gh("mfussenegger/nvim-jdtls"),
+    gh("L3MON4D3/LuaSnip"),
 
     -- mason
     gh("williamboman/mason.nvim"),
 
     -- nvim-treesetter
-    gh('nvim-treesitter/nvim-treesitter'),
-    gh('nvim-treesitter/nvim-treesitter-textobjects'),
-    gh('nvim-mini/mini.nvim'),
+    gh("nvim-treesitter/nvim-treesitter"),
+    gh("nvim-treesitter/nvim-treesitter-textobjects"),
+    gh("nvim-mini/mini.nvim"),
 
     -- java
-    gh('mfussenegger/nvim-jdtls'),
+    gh("mfussenegger/nvim-jdtls"),
 
     -- dap
-    "https://github.com/mfussenegger/nvim-dap",
-    "https://github.com/leoluz/nvim-dap-go",
-    "https://github.com/rcarriga/nvim-dap-ui",
-    "https://github.com/theHamsta/nvim-dap-virtual-text",
+    gh("mfussenegger/nvim-dap"),
+    gh("leoluz/nvim-dap-go"),
+    gh("rcarriga/nvim-dap-ui"),
+    gh("theHamsta/nvim-dap-virtual-text"),
 
     -- git
-    gh('sindrets/diffview.nvim'),
-    gh("https://github.com/kdheepak/lazygit.nvim"),
-    'https://github.com/sindrets/diffview.nvim',
+    gh("sindrets/diffview.nvim"),
+    gh("kdheepak/lazygit.nvim"),
+    gh("sindrets/diffview.nvim"),
 
     -- markdown
-    gh('MeanderingProgrammer/render-markdown.nvim'),
+    gh("MeanderingProgrammer/render-markdown.nvim"),
 
     -- ui
-    "https://github.com/rcarriga/nvim-notify",
-    "https://github.com/nvim-lualine/lualine.nvim",
+    gh("rcarriga/nvim-notify"),
+    gh("nvim-lualine/lualine.nvim"),
     gh("MunifTanjim/nui.nvim"),
     gh("folke/zen-mode.nvim"),
 
@@ -46,12 +46,13 @@ vim.pack.add({
     gh("nvim-telescope/telescope-fzf-native.nvim"),
 
     -- nvim-tree
-    "https://github.com/nvim-tree/nvim-tree.lua",
-    "https://github.com/nvim-tree/nvim-web-devicons",
+    gh("nvim-tree/nvim-tree.lua"),
+    gh("nvim-tree/nvim-web-devicons"),
 
     -- blink
-    "https://github.com/saghen/blink.cmp",
-    "https://github.com/rafamadriz/friendly-snippets",
+    { src = gh("saghen/blink.cmp"), version = "v1" },
+    gh("rafamadriz/friendly-snippets"),
+    gh("echasnovski/mini.snippets"),
 
     -- colorshema
     gh("folke/tokyonight.nvim"),
