@@ -85,6 +85,7 @@ vim.pack.add({
 
     -- adapters
     { src = gh("nvim-neotest/neotest-go"), version = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
+    gh("andythigpen/nvim-coverage"),
 })
 
 require("core.mason-path")
@@ -102,6 +103,7 @@ require("plugin.nvim-tree")
 require("plugin.lualine")
 require("plugin.treesitter")
 require("plugin.telescope")
+require("plugin.test")
 
 require("xcodebuild").setup({})
 require("grug-far").setup({})
