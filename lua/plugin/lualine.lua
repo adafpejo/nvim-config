@@ -1,7 +1,3 @@
-vim.pack.add({
-    "https://github.com/nvim-lualine/lualine.nvim"
-})
-
 -- setup
 local project_root = {
     function()
@@ -13,7 +9,6 @@ local project_root = {
 }
 
 local lualine = require("lualine")
-local lazy_status = require("lazy.status") -- to configure lazy pending updates count
 
 local colors = {
     blue = "#65D1FF",
