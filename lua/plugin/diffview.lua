@@ -1,4 +1,3 @@
--- setup
 local actions = require("diffview.actions")
 require('diffview').setup({
     file_history_view = 'list',

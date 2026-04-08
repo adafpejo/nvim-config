@@ -27,12 +27,6 @@ vim.keymap.set('v', 'p', '"_dP', {
     noremap = true,
 })
 
--- vim.keymap.set("n", "<leader>ee", function()
---     nt_api.tree.toggle({ find_file = true })
--- end, { desc = "NvimTreeToggle" })
---
-
-
 local function find_file(dir)
     -- 1. pick navigation function (or error early)
     local navigate

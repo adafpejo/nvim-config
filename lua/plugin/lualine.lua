@@ -1,4 +1,3 @@
--- setup
 local project_root = {
     function()
         return vim.fn.fnamemodify(vim.fn.getcwd(), ':t')

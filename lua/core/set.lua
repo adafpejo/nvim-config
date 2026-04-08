@@ -50,3 +50,7 @@ vim.opt.fillchars = { eob = " " } -- change the character at the end of buffer
 
 -- The unnamedplus option makes nvim use the system clipboard for all yank, delete, and put operations that would normally go to the unnamed register.
 vim.opt.clipboard = "unnamedplus"
+
+-- custom formatter conform
+vim.o.formatexpr = "v:lua.require'conform'.formatexpr()"
+

@@ -1,7 +1,6 @@
 local dx = require "bsi.dx"
 
 -- setup
-local nt_api = require("nvim-tree.api")
 require("nvim-tree").setup({
     update_focused_file = {
         enable = true,
@@ -67,9 +66,3 @@ require("nvim-tree").setup({
         end, "Reveal in Finder")
     end,
 })
-
--- keymap
-vim.keymap.set("n", "<leader>ee", function()
-    nt_api.tree.toggle({ find_file = true })
-end, { desc = "NvimTreeToggle" })
-

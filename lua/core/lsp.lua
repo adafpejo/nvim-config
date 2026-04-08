@@ -61,29 +61,6 @@ vim.lsp.config('rust_analyzer', {
     }
 })
 
-vim.diagnostic.config({
-    underline = true,
-    virtual_text = true,
-    update_in_insert = false,
-    severity_sort = true,
-    float = {
-        border = "rounded",
-        source = true,
-    },
-    signs = {
-        text = {
-            [vim.diagnostic.severity.ERROR] = "E ",
-            [vim.diagnostic.severity.WARN] = "W ",
-            [vim.diagnostic.severity.INFO] = "I ",
-            [vim.diagnostic.severity.HINT] = "H ",
-        },
-        numhl = {
-            [vim.diagnostic.severity.ERROR] = "ErrorMsg",
-            [vim.diagnostic.severity.WARN] = "WarningMsg",
-        },
-    },
-})
-
 vim.api.nvim_create_autocmd("LspAttach", {
     group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
     callback = function(event)
@@ -101,7 +78,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
             require('telescope.builtin').lsp_implementations({ file_ignore_patterns = { "node_modules" } })
         end, "Goto references")
         map("gd", function()
-            require('telescope.builtin').lsp_definitions()
+            vim.lsp.buf.definition()
         end, "Goto definitions")
 
         map("[d", function()
@@ -382,86 +359,3 @@ end
 -- Create command
 vim.api.nvim_create_user_command('LspInfo', lsp_info, { desc = "Show comprehensive LSP information" })
 
-
-local function lsp_status_short()
-    local bufnr = vim.api.nvim_get_current_buf()
-    local clients = vim.lsp.get_clients({ bufnr = bufnr })
-
-    if #clients == 0 then
-        return "" -- Return empty string when no LSP
-    end
-
-    local names = {}
-    for _, client in ipairs(clients) do
-        table.insert(names, client.name)
-    end
-
-    return "󰒋 " .. table.concat(names, ",")
-end
-
-local function git_branch()
-    local ok, handle = pcall(io.popen, "git branch --show-current 2>/dev/null")
-    if not ok or not handle then
-        return ""
-    end
-    local branch = handle:read("*a")
-    handle:close()
-    if branch and branch ~= "" then
-        branch = branch:gsub("\n", "")
-        return " 󰊢 " .. branch
-    end
-    return ""
-end
-
-local function formatter_status()
-    local ok, conform = pcall(require, "conform")
-    if not ok then
-        return ""
-    end
-
-    local formatters = conform.list_formatters_to_run(0)
-    if #formatters == 0 then
-        return ""
-    end
-
-    local formatter_names = {}
-    for _, formatter in ipairs(formatters) do
-        table.insert(formatter_names, formatter.name)
-    end
-
-    return "󰉿 " .. table.concat(formatter_names, ",")
-end
-
-local function linter_status()
-    local ok, lint = pcall(require, "lint")
-    if not ok then
-        return ""
-    end
-
-    local linters = lint.linters_by_ft[vim.bo.filetype] or {}
-    if #linters == 0 then
-        return ""
-    end
-
-    return "󰁨 " .. table.concat(linters, ",")
-end
--- Safe wrapper functions for statusline
-local function safe_git_branch()
-    local ok, result = pcall(git_branch)
-    return ok and result or ""
-end
-
-local function safe_lsp_status()
-    local ok, result = pcall(lsp_status_short)
-    return ok and result or ""
-end
-
-local function safe_formatter_status()
-    local ok, result = pcall(formatter_status)
-    return ok and result or ""
-end
-
-local function safe_linter_status()
-    local ok, result = pcall(linter_status)
-    return ok and result or ""
-end
