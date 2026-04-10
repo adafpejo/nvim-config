@@ -32,7 +32,7 @@
 ---       -- init.lua
 ---       vim.lsp.config('jdtls', { cmd = { 'jdtls' } })
 ---     ```
-
+vim.notify('lsp/jdtls.lua loaded', vim.log.levels.INFO)
 local handlers = require 'vim.lsp.handlers'
 
 local env = {
@@ -56,7 +56,7 @@ local function get_jdtls_config_dir()
 end
 
 local function get_jdtls_workspace_dir()
-    return get_jdtls_cache_dir() .. '/workspace' .. project_name
+    return get_jdtls_cache_dir() .. '/workspace/' .. project_name
 end
 
 local function to_jvm_args(src)
@@ -128,41 +128,24 @@ end
 
 local jdtls_path = vim.fn.stdpath('data') .. '/mason/packages/jdtls'
 local mac_conifg = jdtls_path .. '/config_mac'
-local eclipse_jar = jdtls_path .. '/plugins/org.eclipse.equinox.launcher_1.7.0.v20250331-1702.jar'
+local eclipse_jar = jdtls_path .. '/plugins/org.eclipse.equinox.launcher_1.7.100.v20251111-0406.jar'
 local lombok_jar = jdtls_path .. '/lombok.jar'
 
 return {
+    name = 'jdtls',
     cmd = {
-        vim.fn.expand("~/.local/share/nvim/mason/bin/jdtls"),
-        '-configuration',
-        get_jdtls_config_dir(),
+        vim.fn.expand("~/.local/share/mise/installs/java/temurin-25.0.2+10.0.LTS/bin/java"),
+        "-Declipse.application=org.eclipse.jdt.ls.core.id1",
+        "-Dosgi.bundles.defaultStartLevel=4",
+        "-Declipse.product=org.eclipse.jdt.ls.core.product",
+        "-Dlog.protocol=true",
+        "-Dlog.level=ALL",
+        "-javaagent:".. lombok_jar,
+        "-jar", eclipse_jar,
+        '-configuration', mac_conifg,
         '-data',
         get_jdtls_workspace_dir(),
-        string.format("--jvm-arg=%s", '-Dlog.protocol=true'),
-        string.format("--jvm-arg=%s", '-Dlog.level=ALL'),
-        string.format("--jvm-arg=%s", '-Xmx1g'),
-        string.format("--jvm-arg=%s", '--add-modules=ALL-SYSTEM'),
-        -- string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.util=ALL-UNNAMED'),
-        -- string.format("--jvm-arg=%s", '--add-opens' .. ' ' .. 'java.base/java.lang=ALL-UNNAMED'),
-        string.format("--jvm-arg=%s", '-javaagent:' .. lombok_jar),
     },
-    -- cmd = {
-    --     '/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/21.0.8-tem/bin/java',
-    --     "-Declipse.application=org.eclipse.jdt.ls.core.id1",
-    --     "-Dosgi.bundles.defaultStartLevel=4",
-    --     "-Declipse.product=org.eclipse.jdt.ls.core.product",
-    --     '-Dlog.level=ALL',
-    --     '-Dlog.protocol=true',
-    --     '--add-modules=ALL-SYSTEM',
-    --     '--add-opens java.base/java.util=ALL-UNNAMED',
-    --     '--add-opens java.base/java.lang=ALL-UNNAMED',
-    --     '-Xmx2G',
-    --     '-jar' .. eclipse_jar,
-    --     '--jvm-arg=-javaagent:' .. lombok_jar,
-    --     -- get_jdtls_jvm_args(),
-    --     '-configuration' .. mac_conifg,
-    --     '-data' .. get_jdtls_workspace_dir(),
-    -- },
     filetypes = { 'java', 'kotlin' },
     root_markers = {
         -- Multi-module projects
@@ -206,16 +189,17 @@ return {
             configuration = {
                 runtimes = {
                     {
-                        name = "JavaSE-24",
-                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/24.0.2-tem",
+                        name = "JavaSE-25",
+                        path = vim.fn.expand("~/.local/share/mise/installs/java/temurin-25.0.2+10.0.LTS"),
+                        default = true
                     },
                     {
                         name = "JavaSE-21",
-                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/21.0.9-tem",
+                        path = vim.fn.expand("~/.local/share/mise/installs/java/temurin-21.0.10+7.0.LTS"),
                     },
                     {
                         name = "JavaSE-17",
-                        path = "/opt/homebrew/opt/sdkman-cli/libexec/candidates/java/17.0.17-tem",
+                        path = vim.fn.expand("~/.local/share/mise/installs/java/temurin-17.0.18+8"),
                     },
                 },
             },

@@ -3,7 +3,6 @@ vim.pack.add({
     gh("nvim-lua/plenary.nvim"),          -- lua functions that many plugins use
     gh("christoomey/vim-tmux-navigator"), -- tmux & split window navigation
     gh("MunifTanjim/nui.nvim"),
-    gh("mfussenegger/nvim-jdtls"),
     gh("L3MON4D3/LuaSnip"),
 
     -- mason
@@ -104,3 +103,4 @@ require("plugin.conform")
 require("xcodebuild").setup({})
 require("grug-far").setup({})
 
+-- require("jdtls").setup()

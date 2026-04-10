@@ -1,3 +1,7 @@
+vim.schedule(function()
+  vim.lsp.config('jdtls', require('core.jdtls'))  -- your lsp/jdtls.lua as a module
+end)
+vim.lsp.log.set_level("debug")
 vim.lsp.enable({
     "yamlls",
     -- "json"
@@ -23,7 +27,7 @@ vim.lsp.enable({
 
     -- java
     "jdtls",
-    "kotlin-language-server",
+    -- "kotlin-language-server",
     "groovyls",
 
     "pyright",

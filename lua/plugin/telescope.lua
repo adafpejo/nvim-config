@@ -22,6 +22,16 @@ require("telescope").setup({
             width = 0.99,
             height = 0.99,
         },
-    },
+        mappings = {
+          i = {
+            ["<C-q>"] = require("telescope.actions").send_to_qflist + require("telescope.actions").open_qflist,
+            ["<M-q>"] = require("telescope.actions").send_selected_to_qflist + require("telescope.actions").open_qflist,
+          },
+          n = {
+            ["<C-q>"] = require("telescope.actions").send_to_qflist + require("telescope.actions").open_qflist,
+            ["<M-q>"] = require("telescope.actions").send_selected_to_qflist + require("telescope.actions").open_qflist,
+          },
+        },
+    }
 })
 
