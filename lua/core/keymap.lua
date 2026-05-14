@@ -4,6 +4,19 @@ local git     = require("bsi.git")
 local keymap = vim.keymap
 local gitsigns = require('gitsigns')
 
+-- keymap
+vim.keymap.set("n", "<leader>lg", "<cmd>LazyGit<cr>", { desc = "LazyGit", noremap = true })
+vim.keymap.set("n", "<leader>z", "<cmd>Zen<CR>", { desc = "Zen mod", noremap = true })
+
+-- harpoon keymap
+vim.keymap.set("n", "<leader>hh", ":lua require('harpoon.ui').toggle_quick_menu()<CR>", { desc = "Harpoon menu", noremap = true })
+vim.keymap.set("n", "<leader>ht", ":Telescope harpoon marks<CR>", { desc = "Telescope menu", noremap = true })
+vim.keymap.set("n", "<leader>ha", ":lua require('harpoon.mark').add_file()<CR>", { desc = "Add file as marked", noremap = true })
+vim.keymap.set("n", "<leader>hn", ":lua require('harpoon.ui').nav_next()<CR>", { desc = "Next file", noremap = true })
+vim.keymap.set("n", "<leader>hp", ":lua require('harpoon.ui').nav_prev()<CR>", { desc = "Previous file", noremap = true })
+vim.keymap.set("n", "<leader>ht", ":lua require('harpoon.term').gotoTerminal(1)<CR>", { desc = "Terminal", noremap = true })
+
+-- gitsigns
 vim.keymap.set('n', '<leader>hs', gitsigns.stage_hunk)
 vim.keymap.set('n', '<leader>hr', gitsigns.reset_hunk)
 vim.keymap.set('v', '<leader>hs', function() gitsigns.stage_hunk { vim.fn.line('.'), vim.fn.line('v') } end)
