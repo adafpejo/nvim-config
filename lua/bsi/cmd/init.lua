@@ -47,59 +47,62 @@ function M.new(cmd, opts)
     _opts = opts,
   }, M)
 
-  if opts.on_complete then
-    opts.on_complete(self)
-  else
-    local handle = vim.system(cmd_table, {
-      cwd = opts.cwd or vim.fn.getcwd(),
-      env = opts.env,
-      text = true,
-      stdout = function(_, data)
-        if data then
-          self._job.stdout = self._job.stdout .. data
-        end
-        if opts.stdout then
-          opts.stdout(self, data)
-        end
-      end,
-      stderr = function(_, data)
-        if data then
-          self._job.stderr = self._job.stderr .. data
-        end
-        if opts.stderr then
-          opts.stderr(self, data)
-        end
-      end,
-    }, function(obj)
-      if not self._job then
+  local handle = vim.system(cmd_table, {
+    cwd = opts.cwd or vim.fn.getcwd(),
+    env = opts.env,
+    text = true,
+    stdout = function(_, data)
+      if data then
+        self._job.stdout = self._job.stdout .. data
+      end
+      if opts.stdout then
+        opts.stdout(self, data)
+      end
+    end,
+    stderr = function(_, data)
+      if data then
+        self._job.stderr = self._job.stderr .. data
+      end
+      if opts.stderr then
+        opts.stderr(self, data)
+      end
+    end,
+  }, function(obj)
+    if not self._job or self._disposed then
+      return
+    end
+
+    self._job.end_time = vim.uv.hrtime()
+    self._job.duration = (self._job.end_time - self._job.start_time) / 1e9
+    self._job.code = obj.code
+    if self._job.status ~= "cancelled" then
+      self._job.status = obj.code == 0 and "done" or "failed"
+    end
+
+    vim.schedule(function()
+      if self._disposed or not self._job then
         return
       end
-      self._job.end_time = vim.uv.hrtime()
-      self._job.duration = (self._job.end_time - self._job.start_time) / 1e9
-      self._job.code = obj.code
-      if self._job.status ~= "cancelled" then
-        self._job.status = obj.code == 0 and "done" or "failed"
+
+      if opts.on_complete then
+        opts.on_complete(self)
+      elseif self._job.status == "done" and opts.on_success then
+        opts.on_success(self)
+      elseif self._job.status == "failed" and opts.on_error then
+        opts.on_error(self)
       end
-
-      vim.schedule(function()
-        if self._disposed then
-          return
-        end
-        if not self._job then
-          return
-        end
-        if self._job.status == "done" and opts.on_success then
-          opts.on_success(self)
-        elseif self._job.status == "failed" and opts.on_error then
-          opts.on_error(self)
-        end
-      end)
     end)
+  end)
 
-    self._handle = handle
-  end
-
+  self._handle = handle
   return self
+end
+
+---Wait for command to finish and return result (alias for :result)
+---@param timeout_ms number? timeout in milliseconds (default: 60000)
+---@return AsyncJob|nil
+function M:wait(timeout_ms)
+  return self:result(timeout_ms)
 end
 
 ---Wait for command to finish and return result
@@ -111,60 +114,54 @@ function M:result(timeout_ms)
   end
   timeout_ms = timeout_ms or 60000
   vim.wait(timeout_ms, function()
-    return self._job.status ~= "running"
-  end)
-  if self._job.status == "running" then
+    return self._job and self._job.status ~= "running"
+  end, 30)
+  if not self._job or self._job.status == "running" then
     return nil
   end
   return self._job
 end
 
----Get current status
 ---@return "running" | "done" | "failed" | "cancelled" | "disposed"
 function M:status()
   if self._disposed then
     return "disposed"
   end
-  return self._job.status
+  return self._job and self._job.status or "disposed"
 end
 
----Get the raw vim.system handle
 ---@return vim.SystemHandle?
 function M:handle()
-  return self._handle
+  return self._disposed and nil or self._handle
 end
 
----Get the job data
----@return AsyncJob
+---@return AsyncJob?
 function M:job()
-  return self._job
+  return self._disposed and nil or self._job
 end
 
----Cancel the running command
 function M:cancel()
   if self._disposed then
     return
   end
-  if self._job.status == "running" then
+  if self._job and self._job.status == "running" then
     self._job.status = "cancelled"
     vim.notify("Command cancelled: " .. table.concat(self.cmd, " "), vim.log.levels.WARN)
   end
   if self._handle then
-    pcall(function()
-      self._handle:kill(9)
-    end)
+    pcall(function() self._handle:kill(9) end)
   end
 end
 
----Dispose the command and free resources
 function M:dispose()
+  if self._disposed then return end
   self._disposed = true
+
   if self._handle then
-    pcall(function()
-      self._handle:kill(9)
-    end)
+    pcall(function() self._handle:kill(9) end)
     self._handle = nil
   end
+
   self._job = nil
 end
 

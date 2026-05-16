@@ -135,7 +135,19 @@ describe("cmd:job", function()
 end)
 
 describe("cmd callbacks", function()
-  it("calls on_success", function()
+  it("calls on_complete", function()
+    local called = false
+    Cmd.new({ "true" }, {
+      on_complete = function(cmd)
+        called = true
+        assert.equals("done", cmd:status())
+      end,
+    })
+    vim.wait(3000, function() return called end)
+    assert.is_true(called)
+  end)
+
+  it("calls on_success when no on_complete", function()
     local called = false
     Cmd.new({ "true" }, {
       on_success = function(cmd)
@@ -159,9 +171,10 @@ describe("cmd callbacks", function()
     assert.is_true(called)
   end)
 
-  it("does not call on_success after dispose", function()
+  it("does not call callbacks after dispose", function()
     local called = false
     local cmd = Cmd.new({ "true" }, {
+      on_complete = function() called = true end,
       on_success = function() called = true end,
     })
     cmd:dispose()
