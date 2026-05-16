@@ -22,7 +22,7 @@ vim.keymap.set('n', '<leader>e', vim.diagnostic.setqflist)
 vim.keymap.set("i", "jk", "<ESC>", { noremap = true, silent = true, desc = "<ESC>" })
 
 -- prevent save selected word
-vim.keymap.set('v', 'p', '"_dP', {
+vim.keymap.set('v', 'p', '"_dp', {
     desc = 'Paste copied text without copying selected',
     noremap = true,
 })
