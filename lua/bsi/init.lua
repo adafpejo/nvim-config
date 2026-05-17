@@ -7,6 +7,8 @@ local nt_api      = require("nvim-tree.api")
 
 local nvim = require("bsi.utils.nvim")
 
+require("bsi.tree").setup()
+require("bsi.ui").setup_keymaps()
 require('notify').setup({
     timeout = 200
 })

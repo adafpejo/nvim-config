@@ -1,39 +1,42 @@
 local M = {}
+local tree = require("bsi.tree")
 
 local layouts = {
   ["1"] = {
-    name = "nvim-tree | buffer",
-    cmd = function()
-      vim.cmd("NvimTreeOpen")
+    name = "Tree | Buffer",
+    apply = function()
+      vim.cmd("only")
+      tree.new():open()
       vim.cmd("wincmd l")
-      if vim.bo.buftype == "" and vim.fn.bufname() == "" then
-        vim.cmd("enew")
-      end
     end,
   },
   ["2"] = {
-    name = "nvim-tree | buffer | git",
-    cmd = function()
-      vim.cmd("NvimTreeOpen")
-      vim.cmd("wincmd l")
-      vim.cmd("vsplit")
-      vim.cmd("wincmd h")
-      vim.cmd("split")
-      vim.cmd("wincmd j")
+    name = "Tree | Branches | Commits",
+    apply = function()
+      vim.cmd("only")
+
+      -- Left: Tree (creates sidebar)
+      tree.new():open()
+
+      -- Branches below Tree
+      vim.cmd("belowright split")
+      vim.cmd("terminal git branch --all")
+
+      -- Commits below Branches
+      vim.cmd("belowright split")
       vim.cmd("terminal git log --oneline --graph --all -20")
-      vim.cmd("wincmd k")
-      vim.cmd("terminal git branch -a")
-      vim.cmd("wincmd =")
+
+      -- Return to main buffer on the right
+      vim.cmd("wincmd l")
     end,
   },
   ["3"] = {
-    name = "git index | git diff",
-    cmd = function()
-      vim.cmd("tabnew")
-      vim.cmd("terminal git status -s -b")
-      vim.cmd("wincmd l")
+    name = "Git Index | Diff",
+    apply = function()
+      vim.cmd("only")
+      vim.cmd("terminal git status --short --branch")
+      vim.cmd("wincmd v")
       vim.cmd("terminal git diff --stat")
-      vim.cmd("wincmd h")
       vim.cmd("wincmd =")
     end,
   },
@@ -41,40 +44,62 @@ local layouts = {
 
 M.current = "1"
 
-function M.apply(id)
-  if not layouts[id] then
-    vim.notify("bsi/ui: unknown layout " .. id, vim.log.levels.ERROR)
-    return
-  end
-
-  -- Close all non-NvimTree windows safely (keep at least one window)
-  local wins = vim.api.nvim_list_wins()
-  for _, win in ipairs(wins) do
+local function cleanup()
+  local keep = {}
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
-    if vim.bo[buf].filetype ~= "NvimTree" then
-      if #vim.api.nvim_list_wins() > 1 then
-        vim.api.nvim_win_close(win, false)
-      end
+    local ft = vim.bo[buf].filetype
+    -- Keep current non-tree non-terminal buffers
+    if ft ~= "bsitree" and vim.bo[buf].buftype ~= "terminal" and ft ~= "" then
+      keep[buf] = true
     end
   end
 
-  layouts[id].cmd()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and not keep[buf] then
+      local ft = vim.bo[buf].filetype
+      local bt = vim.bo[buf].buftype
+      if ft == "bsitree" or bt == "terminal" then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+  end
+end
+
+function M.apply(id)
+  if not layouts[id] then
+    vim.notify("UI: unknown layout " .. id, vim.log.levels.ERROR)
+    return
+  end
+
+  cleanup()
+  layouts[id].apply()
   M.current = id
-  vim.notify("bsi/ui: " .. layouts[id].name, vim.log.levels.INFO)
+  vim.notify("Layout → " .. layouts[id].name, vim.log.levels.INFO)
 end
 
--- Quick switchers
 function M.cycle()
-  local next = (tonumber(M.current) % 3) + 1
-  M.apply(tostring(next))
+  local next_id = tostring(tonumber(M.current) % #vim.tbl_keys(layouts) + 1)
+  M.apply(next_id)
 end
 
--- Keymaps (add to bsi/remap.lua or call manually)
 function M.setup_keymaps()
-  vim.keymap.set("n", "<leader>u1", function() M.apply("1") end, { desc = "UI layout 1: nvim-tree | buffer" })
-  vim.keymap.set("n", "<leader>u2", function() M.apply("2") end, { desc = "UI layout 2: nvim-tree + git branches/commits" })
-  vim.keymap.set("n", "<leader>u3", function() M.apply("3") end, { desc = "UI layout 3: git index | diff" })
-  vim.keymap.set("n", "<leader>uu", function() M.cycle() end,    { desc = "Cycle UI layouts" })
+  local function apply_and_focus(id)
+    M.apply(id)
+    -- Ensure focus is on the main buffer (usually rightmost)
+    vim.cmd("wincmd l")
+  end
+
+  vim.keymap.set("n", "<leader>u1", function() apply_and_focus("1") end, { desc = "UI: Tree | Buffer" })
+  vim.keymap.set("n", "<leader>u2", function() apply_and_focus("2") end, { desc = "UI: Tree + Git Grid" })
+  vim.keymap.set("n", "<leader>u3", function() apply_and_focus("3") end, { desc = "UI: Git Index | Diff" })
+  vim.keymap.set("n", "<leader>uu", function() M.cycle() end,  { desc = "Cycle UI layouts" })
+
+  -- Quick window navigation
+  vim.keymap.set("n", "1", "1<C-w>w", { desc = "Jump to Window 1 (Tree)" })
+  vim.keymap.set("n", "2", "2<C-w>w", { desc = "Jump to Window 2 (Branches)" })
+  vim.keymap.set("n", "3", "3<C-w>w", { desc = "Jump to Window 3 (Commits)" })
+  vim.keymap.set("n", "4", "4<C-w>w", { desc = "Jump to Window 4 (Main Buffer)" })
 end
 
 return M
