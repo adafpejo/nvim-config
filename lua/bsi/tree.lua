@@ -3,6 +3,8 @@
 
 local M = {}
 
+local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+
 ---@class bsi.Node
 ---@field id string
 ---@field name string
@@ -24,34 +26,54 @@ function Renderer.new()
   return setmetatable({}, Renderer)
 end
 
----@param node bsi.Node
----@return string
-function Renderer:_render_node(node)
-  local indent = string.rep("  ", node.depth)
-  local icon
-
-  if node.type == "root" then
-    icon = " "
-  elseif node.type == "directory" then
-    icon = node.expanded and " " or " "
-  else
-    icon = " "
-  end
-
-  return indent .. icon .. node.name
-end
-
 ---@param bufnr integer
 ---@param nodes bsi.Node[]
 ---@param winid integer|nil
 function Renderer:render(bufnr, nodes, winid)
   local lines = {}
-  for _, node in ipairs(nodes) do
-    table.insert(lines, self:_render_node(node))
+  local highlights = {}
+  
+  for i, node in ipairs(nodes) do
+    local indent = string.rep("  ", node.depth)
+    local icon = ""
+    local icon_hl = nil
+    local name_hl = nil
+
+    if node.type == "root" or node.type == "directory" then
+      icon = node.expanded and " " or " "
+      name_hl = "Directory"
+    else
+      if has_devicons then
+        local ic, hl = devicons.get_icon(node.name, vim.fn.fnamemodify(node.name, ":e"), { default = true })
+        icon = ic .. " "
+        icon_hl = hl
+      else
+        icon = " "
+      end
+    end
+
+    table.insert(lines, indent .. icon .. node.name)
+    
+    local icon_start = #indent
+    local icon_end = icon_start + #icon
+    
+    if icon_hl then
+      table.insert(highlights, { hl = icon_hl, line = i - 1, col_start = icon_start, col_end = icon_end })
+    end
+    if name_hl then
+      table.insert(highlights, { hl = name_hl, line = i - 1, col_start = icon_end, col_end = -1 })
+    end
   end
 
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  
+  local ns = vim.api.nvim_create_namespace("bsitree")
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  for _, hl in ipairs(highlights) do
+    vim.api.nvim_buf_add_highlight(bufnr, ns, hl.hl, hl.line, hl.col_start, hl.col_end)
+  end
+
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].filetype = "bsitree"
 
@@ -67,9 +89,8 @@ Provider.__index = Provider
 
 --- Default ignore patterns
 local DEFAULT_IGNORE = {
-  "^%.",
-  "^node_modules$",
-  "^%.git$",
+  "node_modules$",
+  "%.git$",
   "^vendor$",
   "^dist$",
   "^build$",

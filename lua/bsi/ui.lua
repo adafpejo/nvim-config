@@ -14,17 +14,22 @@ local layouts = {
     name = "Tree | Branches | Commits",
     apply = function()
       vim.cmd("only")
+      vim.api.nvim_set_hl(0, "BSITreeTitle", { fg = "#3EFFDC", bold = true })
 
       -- Left: Tree (creates sidebar)
-      tree.new():open()
+      local t = tree.new()
+      t:open()
+      vim.wo[t.winid].winbar = "%#BSITreeTitle# [1] - tree"
 
       -- Branches below Tree
       vim.cmd("belowright split")
       vim.cmd("terminal git branch --all")
+      vim.wo.winbar = "%#BSITreeTitle# [2] - branches"
 
       -- Commits below Branches
       vim.cmd("belowright split")
       vim.cmd("terminal git log --oneline --graph --all -20")
+      vim.wo.winbar = "%#BSITreeTitle# [3] - commits"
 
       -- Return to main buffer on the right
       vim.cmd("wincmd l")
