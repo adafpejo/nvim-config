@@ -3,6 +3,46 @@ local tree = require("bsi.tree")
 
 local Cmd = require("bsi.cmd")
 
+local State = {
+    active_layout = nil,
+    windows = {},
+    buffers = {},
+}
+
+function State.reset()
+    State.active_layout = nil
+    State.windows = {}
+    State.buffers = {}
+end
+
+function State.track_window(win)
+    if win and vim.api.nvim_win_is_valid(win) then
+        table.insert(State.windows, win)
+    end
+end
+
+function State.track_buffer(buf)
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+        table.insert(State.buffers, buf)
+    end
+end
+
+function State.close_current()
+    -- Close windows first
+    for _, win in ipairs(State.windows) do
+        if vim.api.nvim_win_is_valid(win) then
+            pcall(vim.api.nvim_win_close, win, true)
+        end
+    end
+    -- Delete buffers
+    for _, buf in ipairs(State.buffers) do
+        if vim.api.nvim_buf_is_valid(buf) then
+            pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+    end
+    State.reset()
+end
+
 vim.api.nvim_set_hl(0, "BSITreeTitle", { fg = "#3EFFDC", bold = true })
 
 local render_title = function(title)
@@ -17,8 +57,12 @@ end
 
 local function create_git_view(cmd, title)
     vim.cmd("belowright split")
+    local win = vim.api.nvim_get_current_win()
     local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(0, buf)
+    vim.api.nvim_win_set_buf(win, buf)
+    
+    State.track_window(win)
+    State.track_buffer(buf)
     
     pcall(vim.api.nvim_buf_set_name, buf, "GitView: " .. title)
     vim.bo[buf].filetype = "GitView"
@@ -57,9 +101,12 @@ local layouts = {
     ["1"] = {
         name = "Tree | Buffer",
         apply = function(root)
-            vim.cmd("only")
+            State.close_current()
             local t = tree.new({ root = root })
             t:open()
+            State.track_window(t.winid)
+            State.track_buffer(t.bufnr)
+            State.active_layout = "1"
             vim.wo[t.winid].winbar = render_title(t:get_root_path())
             vim.cmd("wincmd l")
         end,
@@ -67,11 +114,15 @@ local layouts = {
     ["2"] = {
         name = "Tree + Git Grid",
         apply = function(root)
-            vim.cmd("only")
+            State.close_current()
 
             -- Left: Tree (creates sidebar)
             local t = tree.new({ git_only = true, root = root })
             t:open()
+            State.track_window(t.winid)
+            State.track_buffer(t.bufnr)
+            State.active_layout = "2"
+            
             local tree_root = t.root_path -- Use the raw root path
             vim.wo[t.winid].winbar = render_title("[1] r: " .. t:get_root_path())
 
@@ -85,20 +136,18 @@ local layouts = {
             create_git_view({ "git", "-C", tree_root, "status", "--short", "--branch" }, "[4] - git status")
 
             -- Set sidebar proportions
-            local tree_win = vim.fn.win_getid(1)
-            local branch_win = vim.fn.win_getid(2)
-            local commit_win = vim.fn.win_getid(3)
-            local git_win = vim.fn.win_getid(4)
+            local wins = State.windows
+            if #wins >= 4 then
+                local total_h = 0
+                for _, w in ipairs(wins) do
+                    total_h = total_h + vim.api.nvim_win_get_height(w)
+                end
 
-            local total_h = vim.api.nvim_win_get_height(tree_win) +
-                          vim.api.nvim_win_get_height(branch_win) +
-                          vim.api.nvim_win_get_height(commit_win) +
-                          vim.api.nvim_win_get_height(git_win)
-
-            vim.api.nvim_win_set_height(tree_win, math.floor(total_h * 0.4))
-            vim.api.nvim_win_set_height(branch_win, math.floor(total_h * 0.2))
-            vim.api.nvim_win_set_height(commit_win, math.floor(total_h * 0.2))
-            vim.api.nvim_win_set_height(git_win, math.floor(total_h * 0.2))
+                vim.api.nvim_win_set_height(wins[1], math.floor(total_h * 0.4))
+                vim.api.nvim_win_set_height(wins[2], math.floor(total_h * 0.2))
+                vim.api.nvim_win_set_height(wins[3], math.floor(total_h * 0.2))
+                vim.api.nvim_win_set_height(wins[4], math.floor(total_h * 0.2))
+            end
 
             -- Return to main buffer on the right
             vim.cmd("wincmd l")
@@ -107,9 +156,13 @@ local layouts = {
     ["3"] = {
         name = "Git Index | Diff",
         apply = function(root)
+            State.close_current()
             root = root or vim.fn.getcwd()
-            vim.cmd("only")
+            State.active_layout = "3"
+            
+            -- First view
             create_git_view({ "git", "-C", root, "status", "--short", "--branch" }, "[1] - status")
+            -- Second view
             vim.cmd("wincmd v")
             create_git_view({ "git", "-C", root, "diff", "--stat" }, "[2] - diff stat")
             vim.cmd("wincmd =")
@@ -147,7 +200,6 @@ function M.apply(id)
         return
     end
 
-    cleanup()
     layouts[id].apply()
     M.current = id
     vim.notify("Layout → " .. layouts[id].name, vim.log.levels.INFO)
