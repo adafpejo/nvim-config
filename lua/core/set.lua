@@ -1,5 +1,7 @@
--- don't use packages here, use only after lazy_init
 --
+vim.o.laststatus = 3        -- Global statusline (one line at bottom for all windows)
+vim.opt.splitkeep = "screen" -- prevent buffer jumps
+
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
 

@@ -55,7 +55,7 @@ function Renderer:render(bufnr, nodes, winid)
     local name_hl = nil
     local status_hl = nil
     local git_status_prefix = ""
-    
+
     local is_current = node.path == current_file
     -- local is_opened = vim.fn.bufloaded(node.path) ~= 0 -- Removed highlighted opened files feature
 
@@ -67,7 +67,7 @@ function Renderer:render(bufnr, nodes, winid)
 
       if gs == "??" then
         status_hl = "DiagnosticWarn"
-        git_status_prefix = "??"
+        git_status_prefix = "?"
       elseif staged == "A" then
         status_hl = "DiagnosticOk"
         name_hl = "DiagnosticOk"
@@ -94,6 +94,14 @@ function Renderer:render(bufnr, nodes, winid)
         status_hl = "DiagnosticOk"
       elseif gs == "DIR_PARTIAL" then
         git_status_prefix = "M"
+        name_hl = "DiagnosticWarn"
+        status_hl = "DiagnosticWarn"
+      elseif gs == "DIR_UNTRACKED" then
+        git_status_prefix = "?"
+        name_hl = "DiagnosticWarn"
+        status_hl = "DiagnosticWarn"
+      elseif gs:sub(1, 10) == "DIR_MULTI:" then
+        git_status_prefix = gs:sub(11)
         name_hl = "DiagnosticWarn"
         status_hl = "DiagnosticWarn"
       end
@@ -124,7 +132,7 @@ function Renderer:render(bufnr, nodes, winid)
     end
 
     local base_content = indent .. prefix .. arrow .. icon .. node.name
-    
+
     -- Fixed column for git status
     local status_col = 34
     local status_text = git_status_prefix
@@ -151,14 +159,14 @@ function Renderer:render(bufnr, nodes, winid)
 
     local arrow_start = current_col
     local arrow_end = arrow_start + #arrow
-    
+
     local icon_start = arrow_end
     local icon_end = icon_start + #icon
 
     if icon_hl then
       table.insert(highlights, { hl = icon_hl, line = i - 1, col_start = icon_start, col_end = icon_end })
     end
-    
+
     if name_hl then
       table.insert(highlights, { hl = name_hl, line = i - 1, col_start = icon_end, col_end = icon_end + #node.name })
     end
@@ -179,7 +187,7 @@ function Renderer:render(bufnr, nodes, winid)
   end
 
   vim.bo[bufnr].modifiable = false
-  vim.bo[bufnr].filetype = "bsitree"
+  vim.bo[bufnr].filetype = "Tree"
 
   if winid and vim.api.nvim_win_is_valid(winid) then
     vim.api.nvim_set_option_value("number", false, { win = winid })
@@ -220,17 +228,40 @@ function Provider:_get_git_changes(root)
     local path = line:sub(4)
     if path:match('^"') then path = path:match('^"(.*)"$') end
     if path:match(" %-> ") then path = vim.split(path, " -> ")[2] end
-    
+
     local fullpath = (git_root .. "/" .. path):gsub("/$", "")
-    if fullpath == root or fullpath:sub(1, #root + 1) == root .. "/" then
-      changes[fullpath] = { status = status }
-      local current = fullpath
-      while #current > #root do
-        current = vim.fn.fnamemodify(current, ":h")
-        if not changes[current] then changes[current] = { status = "dir" }
-        elseif changes[current].status ~= "dir" then break end
-        if current == root then break end
-      end
+
+    -- Check if it's an untracked directory
+    if status == "??" and vim.fn.isdirectory(fullpath) == 1 then
+        -- We need to list all files in this untracked directory and mark them as untracked
+        local function mark_untracked(p)
+            changes[p] = { status = "??" }
+            local h = vim.loop.fs_scandir(p)
+            if h then
+                while true do
+                    local name, type = vim.loop.fs_scandir_next(h)
+                    if not name then break end
+                    local fp = p .. "/" .. name
+                    if type == "directory" then
+                        mark_untracked(fp)
+                    else
+                        changes[fp] = { status = "??" }
+                    end
+                end
+            end
+        end
+        mark_untracked(fullpath)
+    else
+        if fullpath == root or fullpath:sub(1, #root + 1) == root .. "/" then
+          changes[fullpath] = { status = status }
+          local current = fullpath
+          while #current > #root do
+            current = vim.fn.fnamemodify(current, ":h")
+            if not changes[current] then changes[current] = { status = "dir" }
+            elseif changes[current].status ~= "dir" then break end
+            if current == root then break end
+          end
+        end
     end
   end
   return changes
@@ -252,7 +283,7 @@ function Provider:scan(path, depth, opts)
   if git_only and git_changes and not git_changes[path] then return nil end
 
   local node_gs = (git_changes and git_changes[path] and git_changes[path].status ~= "dir") and git_changes[path].status or nil
-  
+
   local node = {
     id = path,
     name = vim.fn.fnamemodify(path, ":t") or path,
@@ -316,24 +347,49 @@ function Provider:scan(path, depth, opts)
   end
 
   if git_changes and node.type == "directory" then
-    local all_staged, some_staged, some_unstaged = true, false, false
+    local all_staged, some_staged, some_unstaged, all_untracked = true, false, false, true
     for _, c in ipairs(node.children) do
       local s = c.git_status
       if s then
-        if s == "DIR_ADDED" then some_staged = true
-        elseif s == "DIR_PARTIAL" then some_unstaged = true; all_staged = false
+        if s == "DIR_ADDED" then some_staged = true; all_untracked = false
+        elseif s == "DIR_PARTIAL" then some_unstaged = true; all_staged = false; all_untracked = false
+        elseif s == "DIR_UNTRACKED" then some_unstaged = true; all_staged = false
         else
           local staged = s:sub(1,1)
           local unstaged = s:sub(2,2)
+          if staged ~= "?" then all_untracked = false end
           if staged ~= " " and staged ~= "?" then some_staged = true end
           if unstaged ~= " " or staged == "?" then some_unstaged = true; all_staged = false end
         end
       else
-        if c.type == "file" then all_staged = false end
+        if c.type == "file" then all_staged = false; all_untracked = false end
+        all_untracked = false
       end
     end
-    if all_staged and some_staged then node.git_status = "DIR_ADDED"
-    elseif some_staged or some_unstaged then node.git_status = "DIR_PARTIAL" end
+    if all_untracked and some_unstaged then node.git_status = "DIR_UNTRACKED"
+    elseif all_staged and some_staged then node.git_status = "DIR_ADDED"
+    elseif some_staged or some_unstaged then
+      -- Collect all unique status characters from children
+      local statuses = {}
+      local chars = {}
+      local function add_status(s)
+        if not s then return end
+        if s == "DIR_ADDED" then s = "A"
+        elseif s == "DIR_PARTIAL" then s = "M"
+        elseif s == "DIR_UNTRACKED" then s = "?"
+        end
+        for j = 1, #s do
+          local char = s:sub(j, j)
+          if char ~= " " and not statuses[char] then
+            statuses[char] = true
+            table.insert(chars, char)
+          end
+        end
+      end
+      for _, c in ipairs(node.children) do add_status(c.git_status) end
+      table.sort(chars)
+      node.git_status = "DIR_MULTI:" .. table.concat(chars, "")
+    end
   end
 
   table.sort(node.children, function(a, b)
@@ -415,17 +471,18 @@ function Tree:open()
   end
   vim.api.nvim_win_set_buf(self.winid, self.bufnr)
   vim.b[self.bufnr].bsi_tree_root = self.root_path
-  
+
   -- Register instance
   M.instances[self.bufnr] = self
+  pcall(vim.api.nvim_buf_set_name, self.bufnr, "GitView: Tree")
 
   if is_new_win then vim.api.nvim_win_set_width(self.winid, 40) end
   self:render()
-  
+
   local map = function(lhs, rhs, desc)
     vim.keymap.set("n", lhs, rhs, { buffer = self.bufnr, silent = true, desc = "Tree: " .. desc })
   end
-  
+
   -- Cleanup on buffer delete
   vim.api.nvim_create_autocmd("BufDelete", {
     buffer = self.bufnr,
@@ -438,6 +495,7 @@ function Tree:open()
   map("q", "<cmd>close<cr>", "Close")
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_file() end, "Open file")
+  map("d", function() self:_diff_file() end, "Diff file")
   map("y", function() self:_yank(false) end, "Yank name")
   map("Y", function() self:_yank(true) end, "Yank relative path")
   map("<LeftMouse>", "<LeftMouse>", "Move cursor")
@@ -489,6 +547,15 @@ function Tree:_open_file()
   if not node or node.type ~= "file" then return end
   vim.cmd("wincmd l")
   vim.cmd("edit " .. vim.fn.fnameescape(node.path))
+end
+
+function Tree:_diff_file()
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local idx = cursor[1]
+  local node = self.visible_nodes[idx]
+  if not node or node.type ~= "file" then return end
+  vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(node.path))
 end
 
 function Tree:_yank(full)
