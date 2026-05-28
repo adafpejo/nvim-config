@@ -1,4 +1,36 @@
-local levels = require("bsi.logger.level")
+local DEBUG = -5
+local INFO = 0
+local WARN = 5
+local ERROR = 10
+local FATAL = 15
+
+--- @param level number
+--- @return string
+local function levelToString(level)
+    if level == DEBUG then
+        return "DEBUG"
+    elseif level == INFO then
+        return "INFO"
+    elseif level == WARN then
+        return "WARN"
+    elseif level == ERROR then
+        return "ERROR"
+    elseif level == FATAL then
+        return "FATAL"
+    end
+    assert(false, "unknown level", level)
+    return ""
+end
+
+local levels = {
+    DEBUG = DEBUG,
+    INFO = INFO,
+    WARN = WARN,
+    ERROR = ERROR,
+    FATAL = FATAL,
+    levelToString = levelToString,
+}
+M_levels = levels
 
 --- @param ... any[]
 --- @return string
@@ -161,5 +193,6 @@ function Logger:fatal(msg, ...)
 end
 
 local module_logger = Logger:new(levels.DEBUG)
+module_logger.levels = M_levels
 
 return module_logger

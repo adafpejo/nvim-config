@@ -614,6 +614,23 @@ function M.get_root_path(bufnr)
   return vim.b[bufnr].bsi_tree_root
 end
 
+function M.toggle_tree()
+  local found_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.bo[buf].filetype == "Tree" then
+      found_win = win
+      break
+    end
+  end
+
+  if found_win then
+    vim.api.nvim_win_close(found_win, true)
+  else
+    M.new():open()
+  end
+end
+
 function M.setup()
   vim.api.nvim_set_hl(0, "BSITreeCurrentFile", { bg = "#3b4261", bold = true })
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
@@ -642,7 +659,7 @@ function M.setup()
     local root = args.args ~= "" and args.args or nil
     M.new({ root = root }):open()
   end, { nargs = "?", complete = "dir" })
-  vim.keymap.set("n", "<leader>tt", function() M.new():open() end, { desc = "Open BSI Tree" })
+  vim.keymap.set("n", "<leader>et", function() M.toggle_tree() end, { desc = "Toggle BSI Tree" })
 end
 
 return M

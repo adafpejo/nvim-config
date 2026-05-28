@@ -1,5 +1,5 @@
 local logger = require("bsi.logger")
-local levels = require("bsi.logger.level")
+local levels = logger.levels
 
 -- setup log file
 logger:init({
