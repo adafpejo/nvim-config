@@ -134,13 +134,13 @@ function Renderer:render(bufnr, nodes, winid)
     if node.type == "root" or node.type == "directory" then
       if node.expanded then
         if node.children and #node.children == 0 then
-          icon = " " -- Empty/Border only
+          icon = "" -- Empty/Border only
         else
-          icon = " " -- Open
+          icon = "" -- Open
         end
         arrow = " "
       else
-        icon = " " -- Closed
+        icon = "" -- Closed
         arrow = " "
       end
       name_hl = name_hl or "Directory"
@@ -148,14 +148,15 @@ function Renderer:render(bufnr, nodes, winid)
       arrow = "  "
       if has_devicons then
         local ic, hl = devicons.get_icon(node.name, vim.fn.fnamemodify(node.name, ":e"), { default = true })
-        icon = ic .. " "
+        icon = ic
         icon_hl = hl
       else
-        icon = " "
+        icon = ""
       end
     end
 
-    local base_content = indent .. arrow .. icon .. node.name
+    local gap = " "
+    local base_content = indent .. arrow .. icon .. gap .. node.name
 
     -- Git detail: +N-M for files, [DMA] postfix for directories
     local detail = ""
@@ -197,13 +198,14 @@ function Renderer:render(bufnr, nodes, winid)
 
     local icon_start = arrow_end
     local icon_end = icon_start + #icon
+    local name_start = icon_end + 1   -- after the space between icon and name
 
     if icon_hl then
       table.insert(highlights, { hl = icon_hl, line = i - 1, col_start = icon_start, col_end = icon_end })
     end
 
     if name_hl then
-      table.insert(highlights, { hl = name_hl, line = i - 1, col_start = icon_end, col_end = icon_end + #node.name })
+      table.insert(highlights, { hl = name_hl, line = i - 1, col_start = name_start, col_end = name_start + #node.name })
     end
 
     if status_text ~= "" then
@@ -213,7 +215,7 @@ function Renderer:render(bufnr, nodes, winid)
 
     -- Apply git detail coloring
     if detail ~= "" then
-      local detail_start = icon_end + #node.name
+      local detail_start = name_start + #node.name
 
       if node.git_numstat then
         -- For files: always split +NN (green) and -MM (red)
@@ -633,7 +635,7 @@ function Tree:get_root_path() return vim.fn.fnamemodify(self.root_path, ":~") en
 function Tree:get_visible_nodes()
   local nodes = {}
   local function walk(node)
-    if node.type ~= "root" then table.insert(nodes, node) end
+    table.insert(nodes, node)
     if (node.type == "directory" or node.type == "root") and node.expanded and node.children then
       for _, child in ipairs(node.children) do walk(child) end
     end
@@ -649,7 +651,9 @@ function Tree:render()
   local render_nodes = {}
   for _, node in ipairs(self.visible_nodes) do
     local n = vim.deepcopy(node)
-    n.depth = n.depth - 1
+    if n.type ~= "root" then
+      n.depth = n.depth - 1
+    end
     table.insert(render_nodes, n)
   end
   self.renderer:render(self.bufnr, render_nodes, self.winid)
@@ -675,6 +679,12 @@ function Tree:open()
 
   if is_new_win then vim.api.nvim_win_set_width(self.winid, 40) end
   self:render()
+
+  -- Set winbar with root name (consistent with u2 layout style)
+  local ok, ctx = pcall(require, "bsi.ui.context")
+  if ok and ctx.render_title then
+    vim.wo[self.winid].winbar = ctx.render_title(self:get_root_path())
+  end
 
   local map = function(lhs, rhs, desc)
     vim.keymap.set("n", lhs, rhs, { buffer = self.bufnr, silent = true, desc = "Tree: " .. desc })
@@ -854,15 +864,27 @@ function M.setup()
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
 
   -- Git change type colors for inline file detail (+N-M)
-  vim.api.nvim_set_hl(0, "BSITreeGitAdded",    { fg = "#9ece6a" })  -- green
-  vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68" })  -- orange
-  vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e" })  -- red
+  -- bg = "NONE" prevents interference with the current-file background highlight
+  vim.api.nvim_set_hl(0, "BSITreeGitAdded",    { fg = "#9ece6a", bg = "NONE" })
+  vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68", bg = "NONE" })
+  vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e", bg = "NONE" })
 
   local group = vim.api.nvim_create_augroup("BSITreeTracking", { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {
     group = group,
     callback = function(args)
-      local path = vim.api.nvim_buf_get_name(args.buf)
+      local buf = args.buf
+
+      -- When focusing the BSI Tree buffer itself, do a full refresh
+      -- (re-scan filesystem + git status/numstat, preserve expansion, then render).
+      if M.instances[buf] then
+        local tree = M.instances[buf]
+        if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
+          tree:refresh()
+        end
+      end
+
+      local path = vim.api.nvim_buf_get_name(buf)
       if path == "" then return end
       for _, tree in pairs(M.instances) do
         if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
