@@ -1051,7 +1051,6 @@ function M.setup(opts)
     local root = args.args ~= "" and args.args or nil
     M.new({ root = root }):open()
   end, { nargs = "?", complete = "dir" })
-  vim.keymap.set("n", "<leader>et", function() M.toggle_tree() end, { desc = "Toggle BSI Tree" })
 end
 
 return M

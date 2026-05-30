@@ -89,11 +89,10 @@ vim.keymap.set('n', '<leader>hd', gitsigns.diffthis)
 vim.keymap.set('n', '<leader>hD', function() gitsigns.diffthis('~') end)
 vim.keymap.set('n', '<leader>td', gitsigns.toggle_deleted)
 
--- nvim-tree keymap
-local nt_api = require("nvim-tree.api")
+-- BSI tree toggle (custom tree)
 vim.keymap.set("n", "<leader>ee", function()
-    nt_api.tree.toggle({ find_file = true })
-end, { noremap = true, desc = "NvimTreeToggle" })
+    require("bsi.ui.tree").toggle_tree()
+end, { noremap = true, desc = "Toggle BSI Tree" })
 
 -- telescope keymap
 -- set keymaps
