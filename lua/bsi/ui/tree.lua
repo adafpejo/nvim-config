@@ -25,13 +25,15 @@ local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 local Renderer = {}
 Renderer.__index = Renderer
 
+--- Creates a new Renderer instance
 function Renderer.new()
   return setmetatable({}, Renderer)
 end
 
----@param bufnr integer
----@param nodes bsi.Node[]
----@param winid integer|nil
+--- Renders the provided nodes into the buffer with appropriate indentation, icons, and highlights
+---@param bufnr integer The buffer to render into
+---@param nodes bsi.Node[] The list of nodes to render
+---@param winid integer|nil Optional window ID to apply window-local settings
 function Renderer:render(bufnr, nodes, winid)
   local lines = {}
   local highlights = {}
@@ -48,7 +50,6 @@ function Renderer:render(bufnr, nodes, winid)
 
   for i, node in ipairs(nodes) do
     local indent = string.rep(" ", node.depth)
-    local prefix = "   "
     local arrow = "  "
     local icon = ""
     local icon_hl = nil
@@ -66,7 +67,8 @@ function Renderer:render(bufnr, nodes, winid)
       local unstaged = gs:sub(2, 2)
 
       if gs == "??" then
-        status_hl = "DiagnosticWarn"
+        status_hl = "DiagnosticOk"
+        name_hl = "DiagnosticOk"
         git_status_prefix = "?"
       elseif staged == "A" then
         status_hl = "DiagnosticOk"
@@ -98,13 +100,35 @@ function Renderer:render(bufnr, nodes, winid)
         status_hl = "DiagnosticWarn"
       elseif gs == "DIR_UNTRACKED" then
         git_status_prefix = "?"
-        name_hl = "DiagnosticWarn"
-        status_hl = "DiagnosticWarn"
+        name_hl = "DiagnosticOk"
+        status_hl = "DiagnosticOk"
       elseif gs:sub(1, 10) == "DIR_MULTI:" then
         git_status_prefix = gs:sub(11)
         name_hl = "DiagnosticWarn"
         status_hl = "DiagnosticWarn"
       end
+    end
+
+    -- Remove the far-right single-char git status for file lines
+    -- (we now show richer colored +N-M detail inline instead)
+    if node.type == "file" then
+      git_status_prefix = ""
+    end
+
+    -- For directories that contain git changes, use purple for the directory name + [DMA] postfix
+    -- (overrides any green/yellow/red from aggregated status, including red from deletions)
+    if (node.type == "directory" or node.type == "root") and node.git_status_summary then
+      git_status_prefix = ""
+      status_hl = nil
+      name_hl = "Special" -- purple for any directory touched by git
+    end
+
+    -- Determine highlight color for the inline git detail
+    -- For directories with changes: purple ("Special") for the [DMA] postfix
+    -- (For files the +N-M is always split-colored green/red in the highlight pass below)
+    local detail_hl = nil
+    if node.git_status_summary then
+      detail_hl = "Special" -- purple for directories containing git changes
     end
 
     if node.type == "root" or node.type == "directory" then
@@ -131,9 +155,24 @@ function Renderer:render(bufnr, nodes, winid)
       end
     end
 
-    local base_content = indent .. prefix .. arrow .. icon .. node.name
+    local base_content = indent .. arrow .. icon .. node.name
 
-    -- Fixed column for git status
+    -- Git detail: +N-M for files, [DMA] postfix for directories
+    local detail = ""
+    if node.type == "file" and node.git_numstat then
+      local a = tonumber(node.git_numstat.added) or 0
+      local d = tonumber(node.git_numstat.deleted) or 0
+      if a > 0 or d > 0 then
+        detail = string.format(" +%d-%d", a, d)
+      end
+    elseif (node.type == "directory" or node.type == "root") and node.git_status_summary then
+      detail = " [" .. node.git_status_summary .. "]"
+    end
+    if detail ~= "" then
+      base_content = base_content .. detail
+    end
+
+    -- Fixed column for git status (single-char compact indicator)
     local status_col = 34
     local status_text = git_status_prefix
     local line_content = base_content
@@ -153,10 +192,6 @@ function Renderer:render(bufnr, nodes, winid)
     end
 
     local current_col = #indent
-    if prefix ~= "" then
-      current_col = current_col + #prefix
-    end
-
     local arrow_start = current_col
     local arrow_end = arrow_start + #arrow
 
@@ -174,6 +209,47 @@ function Renderer:render(bufnr, nodes, winid)
     if status_text ~= "" then
       local status_start = #line_content - #status_text
       table.insert(highlights, { hl = status_hl or "Normal", line = i - 1, col_start = status_start, col_end = -1 })
+    end
+
+    -- Apply git detail coloring
+    if detail ~= "" then
+      local detail_start = icon_end + #node.name
+
+      if node.git_numstat then
+        -- For files: always split +NN (green) and -MM (red)
+        -- Example: " +34-23" → +34 in BSITreeGitAdded, -23 in BSITreeGitDeleted
+        local plus_idx = detail:find("%+")
+        local minus_idx = detail:find("%-")
+
+        if plus_idx then
+          local plus_start = detail_start + plus_idx - 1
+          local minus_start = minus_idx and (detail_start + minus_idx - 1) or (detail_start + #detail)
+          table.insert(highlights, {
+            hl = "BSITreeGitAdded", -- green
+            line = i - 1,
+            col_start = plus_start,
+            col_end = minus_start,
+          })
+        end
+
+        if minus_idx then
+          local minus_start = detail_start + minus_idx - 1
+          table.insert(highlights, {
+            hl = "BSITreeGitDeleted", -- red
+            line = i - 1,
+            col_start = minus_start,
+            col_end = detail_start + #detail,
+          })
+        end
+      elseif detail_hl then
+        -- Directories (and any future non-numstat cases): single color (usually purple "Special")
+        table.insert(highlights, {
+          hl = detail_hl,
+          line = i - 1,
+          col_start = detail_start,
+          col_end = detail_start + #detail,
+        })
+      end
     end
   end
 
@@ -201,8 +277,12 @@ Provider.__index = Provider
 
 local DEFAULT_IGNORE = { "node_modules$", "%.git$", "^vendor$", "^dist$", "^build$", "^target$" }
 
+--- Creates a new Provider instance for scanning the filesystem
 function Provider.new() return setmetatable({}, Provider) end
 
+--- Fetches git status information for all files within the specified root directory
+---@param root string The directory to check for git status
+---@return table|nil A map of file paths to their git status information
 function Provider:_get_git_changes(root)
   root = root:gsub("/$", "")
   local git_root_cmd = "git -C " .. vim.fn.shellescape(root) .. " rev-parse --show-toplevel 2>/dev/null"
@@ -267,6 +347,67 @@ function Provider:_get_git_changes(root)
   return changes
 end
 
+--- Fetches git numstat (+added/-deleted lines) for files in the repo.
+--- Runs both `git diff --numstat` (unstaged) and `git diff --cached --numstat` (staged) and merges results.
+---@param root string The directory to check
+---@return table|nil Map of absolute file path -> {added: integer, deleted: integer}
+function Provider:_get_git_numstats(root)
+  root = root:gsub("/$", "")
+  local git_root_cmd = { "git", "-C", root, "rev-parse", "--show-toplevel" }
+  local git_root = vim.fn.system(git_root_cmd)
+  if vim.v.shell_error ~= 0 then return nil end
+  git_root = vim.trim(git_root)
+  if git_root == "" then return nil end
+
+  local stats = {}
+
+  local function parse_and_merge(output)
+    for line in output:gmatch("[^\r\n]+") do
+      -- <added>\t<deleted>\t<path>
+      local added_str, deleted_str, path = line:match("^(%S+)%s+(%S+)%s+(.+)$")
+      if not added_str or not deleted_str or not path then goto continue end
+
+      -- Handle renames: "old => new" or "old => new" with quotes
+      if path:match(" => ") then
+        path = vim.split(path, " => ")[2] or path
+      end
+      if path:match('^"') then
+        path = path:match('^"(.*)"$') or path
+      end
+
+      local added = (added_str == "-") and 0 or (tonumber(added_str) or 0)
+      local deleted = (deleted_str == "-") and 0 or (tonumber(deleted_str) or 0)
+
+      local fullpath = (git_root .. "/" .. path):gsub("/$", "")
+
+      if stats[fullpath] then
+        stats[fullpath].added = stats[fullpath].added + added
+        stats[fullpath].deleted = stats[fullpath].deleted + deleted
+      else
+        stats[fullpath] = { added = added, deleted = deleted }
+      end
+      ::continue::
+    end
+  end
+
+  -- Unstaged changes
+  local out1 = vim.fn.system({ "git", "-C", git_root, "diff", "--numstat" })
+  if vim.v.shell_error == 0 and out1 ~= "" then
+    parse_and_merge(out1)
+  end
+
+  -- Staged changes
+  local out2 = vim.fn.system({ "git", "-C", git_root, "diff", "--cached", "--numstat" })
+  if vim.v.shell_error == 0 and out2 ~= "" then
+    parse_and_merge(out2)
+  end
+
+  return next(stats) and stats or nil
+end
+
+--- Checks if a file or directory name matches any of the patterns in DEFAULT_IGNORE
+---@param name string The name of the file or directory
+---@return boolean True if the name should be ignored
 function Provider:_should_ignore(name)
   for _, pattern in ipairs(DEFAULT_IGNORE) do
     if name:match(pattern) then return true end
@@ -274,11 +415,17 @@ function Provider:_should_ignore(name)
   return false
 end
 
+--- Recursively scans a directory path to build a tree structure of bsi.Node objects
+---@param path string The directory path to scan
+---@param depth integer Current recursion depth
+---@param opts table Scanning options (expand_all, git_only, git_changes, git_numstats)
+---@return bsi.Node|nil The root node of the scanned subtree
 function Provider:scan(path, depth, opts)
   depth = depth or 0
   opts = opts or {}
   local git_changes = opts.git_changes
   local git_only = opts.git_only
+  local git_numstats = opts.git_numstats
 
   if git_only and git_changes and not git_changes[path] then return nil end
 
@@ -332,6 +479,7 @@ function Provider:scan(path, depth, opts)
     end
 
     local g_status = git_changes and git_changes[fullpath] and git_changes[fullpath].status
+    local numstat = git_numstats and git_numstats[fullpath] or nil
     local child
     if is_dir then
       child = self:scan(fullpath, depth + 1, opts)
@@ -340,7 +488,7 @@ function Provider:scan(path, depth, opts)
         child.expanded = opts.expand_all or (depth < 1)
       else goto continue end
     else
-      child = { id = fullpath, name = name, path = fullpath, type = "file", depth = depth + 1, expanded = false, children = nil, git_status = g_status ~= "dir" and g_status or nil }
+      child = { id = fullpath, name = name, path = fullpath, type = "file", depth = depth + 1, expanded = false, children = nil, git_status = g_status ~= "dir" and g_status or nil, git_numstat = numstat }
     end
     table.insert(node.children, child)
     ::continue::
@@ -392,6 +540,43 @@ function Provider:scan(path, depth, opts)
     end
   end
 
+  -- Build canonical directory summary for postfix [DMA] etc.
+  if git_changes and node.type == "directory" and node.children then
+    local has = { A = false, M = false, D = false }
+    local function mark(s)
+      if not s then return end
+      if s == "DIR_ADDED" then has.A = true; return end
+      if s == "DIR_UNTRACKED" then has.A = true; return end
+      if s == "DIR_PARTIAL" then has.A = true; has.M = true; return end
+      if s:sub(1, 10) == "DIR_MULTI:" then
+        local rest = s:sub(11)
+        if rest:match("A") or rest:match("%?") then has.A = true end
+        if rest:match("[MRC]") then has.M = true end
+        if rest:match("D") then has.D = true end
+        return
+      end
+      -- porcelain 2-char or single char
+      if s:match("A") or s:match("%?") then has.A = true end
+      if s:match("[MRC]") then has.M = true end
+      if s:match("D") then has.D = true end
+    end
+    for _, c in ipairs(node.children) do
+      mark(c.git_status)
+      if c.git_status_summary then
+        if c.git_status_summary:match("A") then has.A = true end
+        if c.git_status_summary:match("M") then has.M = true end
+        if c.git_status_summary:match("D") then has.D = true end
+      end
+    end
+    local summary = ""
+    if has.D then summary = summary .. "D" end
+    if has.M then summary = summary .. "M" end
+    if has.A then summary = summary .. "A" end
+    if summary ~= "" then
+      node.git_status_summary = summary
+    end
+  end
+
   table.sort(node.children, function(a, b)
     if a.type ~= b.type then return a.type == "directory" end
     return a.name:lower() < b.name:lower()
@@ -404,6 +589,7 @@ function Provider:scan(path, depth, opts)
     node.path = child.path
     node.id = child.id
     node.git_status = child.git_status
+    node.git_status_summary = child.git_status_summary
     local function sync_depth(n, d)
       n.depth = d
       if n.children then for _, c in ipairs(n.children) do sync_depth(c, d + 1) end end
@@ -417,6 +603,8 @@ end
 local Tree = {}
 Tree.__index = Tree
 
+--- Creates a new Tree instance and performs initial scan
+---@param opts table Tree options (root, expand_all, git_only, bufnr, winid)
 function Tree.new(opts)
   opts = opts or {}
   local self = setmetatable({}, Tree)
@@ -426,6 +614,9 @@ function Tree.new(opts)
   self.opts = opts
   local scan_opts = { expand_all = opts.expand_all, git_only = opts.git_only }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
+  scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
+  self._git_changes = scan_opts.git_changes
+  self._git_numstats = scan_opts.git_numstats
   local root_node = self.provider:scan(self.root_path, 0, scan_opts)
   self.state = { root = root_node or { id = self.root_path, name = vim.fn.fnamemodify(self.root_path, ":t"), path = self.root_path, type = "root", depth = 0, expanded = true, children = {} } }
   self.bufnr = opts.bufnr
@@ -433,8 +624,12 @@ function Tree.new(opts)
   return self
 end
 
+--- Returns the root path of the tree formatted for display (home-relative)
+---@return string
 function Tree:get_root_path() return vim.fn.fnamemodify(self.root_path, ":~") end
 
+--- Flattens the tree structure into a list of nodes that are currently visible (based on expansion state)
+---@return bsi.Node[]
 function Tree:get_visible_nodes()
   local nodes = {}
   local function walk(node)
@@ -447,6 +642,7 @@ function Tree:get_visible_nodes()
   return nodes
 end
 
+--- Updates the tree buffer by flattening the state and calling the renderer
 function Tree:render()
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then return end
   self.visible_nodes = self:get_visible_nodes()
@@ -459,6 +655,7 @@ function Tree:render()
   self.renderer:render(self.bufnr, render_nodes, self.winid)
 end
 
+--- Opens the tree in a side window, sets up the buffer, and registers keybindings
 function Tree:open()
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then
     self.bufnr = vim.api.nvim_create_buf(false, true)
@@ -503,6 +700,7 @@ function Tree:open()
   map("<2-LeftMouse>", function() self:toggle() end, "Double click to toggle/open")
 end
 
+--- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
 function Tree:refresh()
   local expanded = {}
   local function collect(node)
@@ -512,6 +710,9 @@ function Tree:refresh()
   collect(self.state.root)
   local scan_opts = { expand_all = self.opts.expand_all, git_only = self.opts.git_only }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
+  scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
+  self._git_changes = scan_opts.git_changes
+  self._git_numstats = scan_opts.git_numstats
   local new_root = self.provider:scan(self.root_path, 0, scan_opts)
   new_root = new_root or { id = self.root_path, name = vim.fn.fnamemodify(self.root_path, ":t"), path = self.root_path, type = "root", depth = 0, expanded = true, children = {} }
   local function restore(node)
@@ -525,6 +726,7 @@ function Tree:refresh()
   self:render()
 end
 
+--- Toggles the expansion state of the directory under the cursor or opens the file
 function Tree:toggle()
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -532,13 +734,15 @@ function Tree:toggle()
   local node = self.visible_nodes[idx]
   if not node or node.type == "file" then self:_open_file() return end
   if not node.expanded and node.type == "directory" and node.children and #node.children == 0 then
-    local scanned = self.provider:scan(node.path, node.depth)
+    local scan_opts = { git_changes = self._git_changes, git_numstats = self._git_numstats }
+    local scanned = self.provider:scan(node.path, node.depth, scan_opts)
     node.children = scanned.children
   end
   node.expanded = not node.expanded
   self:render()
 end
 
+--- Opens the file under the cursor in the previous window
 function Tree:_open_file()
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -549,6 +753,7 @@ function Tree:_open_file()
   vim.cmd("edit " .. vim.fn.fnameescape(node.path))
 end
 
+--- Opens a git diff view for the file under the cursor
 function Tree:_diff_file()
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -558,6 +763,8 @@ function Tree:_diff_file()
   vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(node.path))
 end
 
+--- Yanks the name or relative path of the node under the cursor to the clipboard
+---@param full boolean If true, yanks the relative path from root; otherwise yanks only the name
 function Tree:_yank(full)
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -570,6 +777,8 @@ function Tree:_yank(full)
   vim.schedule(function() vim.fn.setreg("+", text) end)
 end
 
+--- Locates a specific file path in the tree, expanding directories as needed to make it visible
+---@param target_path string The absolute path of the file to find
 function Tree:find_file(target_path)
   if not target_path or target_path == "" then return end
   if target_path:sub(1, #self.root_path) ~= self.root_path then return end
@@ -580,8 +789,9 @@ function Tree:find_file(target_path)
       if target:sub(1, #node.path) == node.path then
         if not node.expanded then
           if node.children and #node.children == 0 then
-             local scanned = self.provider:scan(node.path, node.depth, self.opts)
-             node.children = scanned.children
+            local scan_opts = { git_changes = self._git_changes, git_numstats = self._git_numstats }
+            local scanned = self.provider:scan(node.path, node.depth, scan_opts)
+            node.children = scanned.children
           end
           node.expanded = true
         end
@@ -608,12 +818,19 @@ function Tree:find_file(target_path)
   end
 end
 
+--- Factory method to create a new Tree instance
+---@param opts table Tree options
 function M.new(opts) return Tree.new(opts) end
+
+--- Retrieves the root path associated with a tree buffer
+---@param bufnr integer|nil The buffer number (defaults to current)
+---@return string|nil
 function M.get_root_path(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   return vim.b[bufnr].bsi_tree_root
 end
 
+--- Toggles the visibility of the BSI tree window
 function M.toggle_tree()
   local found_win = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -631,9 +848,15 @@ function M.toggle_tree()
   end
 end
 
+--- Initializes global tree settings, highlights, autocommands, and user commands
 function M.setup()
   vim.api.nvim_set_hl(0, "BSITreeCurrentFile", { bg = "#3b4261", bold = true })
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
+
+  -- Git change type colors for inline file detail (+N-M)
+  vim.api.nvim_set_hl(0, "BSITreeGitAdded",    { fg = "#9ece6a" })  -- green
+  vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68" })  -- orange
+  vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e" })  -- red
 
   local group = vim.api.nvim_create_augroup("BSITreeTracking", { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {

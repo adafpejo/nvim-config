@@ -13,6 +13,7 @@ vim.lsp.enable({
     "ts-ls",
     "html-ls",
     "css-ls",
+    "ejs_ls",
     "jinja-lsp",
 
     -- go

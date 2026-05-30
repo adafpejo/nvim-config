@@ -7,6 +7,7 @@ require("conform").setup({
     sh = { "shfmt" },
     bash = { "shfmt" },
     rust = { "rustfmt" },
+    ejs = { "prettier" },
   },
   default_format_opts = {
     lsp_format = "fallback",

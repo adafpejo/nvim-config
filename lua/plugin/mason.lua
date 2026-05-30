@@ -8,6 +8,7 @@ local opts = {
         "typescript-language-server",      -- TypeScript LSP
         "html-lsp",                        -- HTML LSP
         "css-lsp",                         -- CSS LSP
+        "ejs-language-server",             -- EJS LSP
 
         "rust-analyzer",                   -- Rust LSP
         "intelephense",                    -- PHP LSP
@@ -24,6 +25,7 @@ local opts = {
         "golangci-lint",
         "eslint_d",
         "luacheck",     -- Lua linting
+        "prettier",     -- Formatter
 
         -- Additional useful tools
         "delve",          -- Go debugger

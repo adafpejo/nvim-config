@@ -50,6 +50,7 @@ local ensureInstalled = {
     "diff",
     "dockerfile",
     "dot",
+    "ejs",
     "git_config",     -- ??
     "go",
     "goctl",

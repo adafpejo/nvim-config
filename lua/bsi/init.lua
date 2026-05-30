@@ -109,6 +109,13 @@ autocmd({ 'BufNewFile', 'BufRead' }, {
     end
 })
 
+autocmd({ 'BufNewFile', 'BufRead' }, {
+    pattern = { "*.ejs" },
+    callback = function()
+        vim.opt_local.filetype = "ejs"
+    end
+})
+
 
 
 autocmd({ "FileType" }, {
