@@ -5,6 +5,13 @@ local M = {}
 
 M.instances = {}
 
+--- Default configuration for the tree
+M.config = {
+  -- Whether to show hidden (dot) files/directories and git-ignored files by default.
+  -- Can be toggled at runtime with the "h" key inside a tree.
+  show_ignored = true,
+}
+
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 
 ---@class bsi.Node
@@ -417,6 +424,68 @@ function Provider:_should_ignore(name)
   return false
 end
 
+--- Determines whether a path should be skipped based on hidden/gitignore settings.
+---@param fullpath string
+---@param name string
+---@param opts table|nil { show_ignored = boolean }
+function Provider:_should_skip(fullpath, name, opts)
+  opts = opts or {}
+  local show_ignored = opts.show_ignored == true
+
+  if not show_ignored then
+    -- Apply hardcoded ignores (including .git) only when not showing ignored
+    for _, pattern in ipairs(DEFAULT_IGNORE) do
+      if name:match(pattern) then
+        return true
+      end
+    end
+
+    -- Hidden files/directories (dotfiles)
+    if name:match("^%.") then
+      return true
+    end
+
+    -- Git ignored
+    if self:_is_git_ignored(fullpath) then
+      return true
+    end
+  end
+
+  return false
+end
+
+--- Checks if a path is ignored according to .gitignore (cached).
+function Provider:_is_git_ignored(fullpath)
+  self._ignored_cache = self._ignored_cache or {}
+
+  if self._ignored_cache[fullpath] ~= nil then
+    return self._ignored_cache[fullpath]
+  end
+
+  -- Determine git root (cached)
+  if self._git_root == nil then
+    local dir = vim.fn.fnamemodify(fullpath, ":h")
+    local out = vim.fn.systemlist({ "git", "-C", dir, "rev-parse", "--show-toplevel" })
+    if vim.v.shell_error == 0 and out[1] then
+      self._git_root = vim.trim(out[1])
+    else
+      self._git_root = false
+    end
+  end
+
+  if not self._git_root then
+    self._ignored_cache[fullpath] = false
+    return false
+  end
+
+  local cmd = { "git", "-C", self._git_root, "check-ignore", "-q", "--", fullpath }
+  vim.fn.system(cmd)
+  local is_ignored = (vim.v.shell_error == 0)
+
+  self._ignored_cache[fullpath] = is_ignored
+  return is_ignored
+end
+
 --- Recursively scans a directory path to build a tree structure of bsi.Node objects
 ---@param path string The directory path to scan
 ---@param depth integer Current recursion depth
@@ -439,7 +508,7 @@ function Provider:scan(path, depth, opts)
     path = path,
     type = depth == 0 and "root" or "directory",
     depth = depth,
-    expanded = opts.expand_all or (depth < 2),
+    expanded = opts.expand_all or (depth == 0),
     children = {},
     git_status = node_gs,
   }
@@ -450,7 +519,10 @@ function Provider:scan(path, depth, opts)
     while true do
       local name = vim.loop.fs_scandir_next(handle)
       if not name then break end
-      if not self:_should_ignore(name) then children_map[name] = true end
+      local full = path .. "/" .. name
+      if not self:_should_skip(full, name, opts) then
+        children_map[name] = true
+      end
     end
   end
 
@@ -487,7 +559,7 @@ function Provider:scan(path, depth, opts)
       child = self:scan(fullpath, depth + 1, opts)
       if child then
         if git_only and #child.children == 0 then goto continue end
-        child.expanded = opts.expand_all or (depth < 1)
+        child.expanded = opts.expand_all or false
       else goto continue end
     else
       child = { id = fullpath, name = name, path = fullpath, type = "file", depth = depth + 1, expanded = false, children = nil, git_status = g_status ~= "dir" and g_status or nil, git_numstat = numstat }
@@ -580,7 +652,30 @@ function Provider:scan(path, depth, opts)
   end
 
   table.sort(node.children, function(a, b)
-    if a.type ~= b.type then return a.type == "directory" end
+    -- Directories before files
+    if a.type ~= b.type then
+      return a.type == "directory"
+    end
+
+    -- Within directories: special ordering for dot directories
+    if a.type == "directory" then
+      local function dir_priority(name)
+        if name == ".git" then return 0 end          -- .git always first
+        if name:sub(1, 1) == "." then return 1 end    -- other dot directories next
+        return 2                                       -- regular directories last
+      end
+
+      local pa = dir_priority(a.name)
+      local pb = dir_priority(b.name)
+      if pa ~= pb then
+        return pa < pb
+      end
+
+      -- Same priority group: sort alphabetically (case-insensitive)
+      return a.name:lower() < b.name:lower()
+    end
+
+    -- Files: alphabetical (case-insensitive)
     return a.name:lower() < b.name:lower()
   end)
 
@@ -606,7 +701,8 @@ local Tree = {}
 Tree.__index = Tree
 
 --- Creates a new Tree instance and performs initial scan
----@param opts table Tree options (root, expand_all, git_only, bufnr, winid)
+---@param opts table Tree options (root, expand_all, git_only, bufnr, winid, show_ignored)
+---        show_ignored defaults to M.config.show_ignored (true by default)
 function Tree.new(opts)
   opts = opts or {}
   local self = setmetatable({}, Tree)
@@ -614,7 +710,17 @@ function Tree.new(opts)
   self.renderer = Renderer.new()
   self.root_path = opts.root or vim.fn.getcwd()
   self.opts = opts
-  local scan_opts = { expand_all = opts.expand_all, git_only = opts.git_only }
+  -- Per-instance option takes precedence, otherwise fall back to global config (default true)
+  if opts.show_ignored ~= nil then
+    self.show_ignored = opts.show_ignored
+  else
+    self.show_ignored = M.config.show_ignored
+  end
+  local scan_opts = {
+    expand_all = opts.expand_all,
+    git_only = opts.git_only,
+    show_ignored = self.show_ignored,
+  }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
   scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
   self._git_changes = scan_opts.git_changes
@@ -635,7 +741,9 @@ function Tree:get_root_path() return vim.fn.fnamemodify(self.root_path, ":~") en
 function Tree:get_visible_nodes()
   local nodes = {}
   local function walk(node)
-    table.insert(nodes, node)
+    if node.type ~= "root" then
+      table.insert(nodes, node)
+    end
     if (node.type == "directory" or node.type == "root") and node.expanded and node.children then
       for _, child in ipairs(node.children) do walk(child) end
     end
@@ -699,6 +807,7 @@ function Tree:open()
   })
 
   map("R", function() self:refresh() end, "Refresh")
+  map("h", function() self:toggle_show_ignored() end, "Toggle hidden & git-ignored files/dirs")
   map("q", "<cmd>close<cr>", "Close")
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_file() end, "Open file")
@@ -712,13 +821,23 @@ end
 
 --- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
 function Tree:refresh()
+  -- Clear gitignore caches on refresh
+  if self.provider then
+    self.provider._ignored_cache = {}
+    self.provider._git_root = nil
+  end
+
   local expanded = {}
   local function collect(node)
     if node.expanded then expanded[node.id] = true end
     if node.children then for _, child in ipairs(node.children) do collect(child) end end
   end
   collect(self.state.root)
-  local scan_opts = { expand_all = self.opts.expand_all, git_only = self.opts.git_only }
+  local scan_opts = {
+    expand_all = self.opts.expand_all,
+    git_only = self.opts.git_only,
+    show_ignored = self.show_ignored,
+  }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
   scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
   self._git_changes = scan_opts.git_changes
@@ -736,6 +855,19 @@ function Tree:refresh()
   self:render()
 end
 
+--- Toggles visibility of hidden (dot) files and git-ignored files/directories
+function Tree:toggle_show_ignored()
+  self.show_ignored = not (self.show_ignored or false)
+
+  -- Clear caches so gitignore checks are re-evaluated
+  if self.provider then
+    self.provider._ignored_cache = {}
+    self.provider._git_root = nil
+  end
+
+  self:refresh()
+end
+
 --- Toggles the expansion state of the directory under the cursor or opens the file
 function Tree:toggle()
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
@@ -744,7 +876,11 @@ function Tree:toggle()
   local node = self.visible_nodes[idx]
   if not node or node.type == "file" then self:_open_file() return end
   if not node.expanded and node.type == "directory" and node.children and #node.children == 0 then
-    local scan_opts = { git_changes = self._git_changes, git_numstats = self._git_numstats }
+    local scan_opts = {
+      git_changes = self._git_changes,
+      git_numstats = self._git_numstats,
+      show_ignored = self.show_ignored,
+    }
     local scanned = self.provider:scan(node.path, node.depth, scan_opts)
     node.children = scanned.children
   end
@@ -799,7 +935,11 @@ function Tree:find_file(target_path)
       if target:sub(1, #node.path) == node.path then
         if not node.expanded then
           if node.children and #node.children == 0 then
-            local scan_opts = { git_changes = self._git_changes, git_numstats = self._git_numstats }
+            local scan_opts = {
+              git_changes = self._git_changes,
+              git_numstats = self._git_numstats,
+              show_ignored = self.show_ignored,
+            }
             local scanned = self.provider:scan(node.path, node.depth, scan_opts)
             node.children = scanned.children
           end
@@ -829,7 +969,7 @@ function Tree:find_file(target_path)
 end
 
 --- Factory method to create a new Tree instance
----@param opts table Tree options
+---@param opts table|nil Tree options. `show_ignored` defaults to the value set in `M.setup()`.
 function M.new(opts) return Tree.new(opts) end
 
 --- Retrieves the root path associated with a tree buffer
@@ -859,7 +999,14 @@ function M.toggle_tree()
 end
 
 --- Initializes global tree settings, highlights, autocommands, and user commands
-function M.setup()
+---@param opts table|nil Configuration options (e.g. { show_ignored = true })
+function M.setup(opts)
+  opts = opts or {}
+  -- Merge user options into the global config
+  for k, v in pairs(opts) do
+    M.config[k] = v
+  end
+
   vim.api.nvim_set_hl(0, "BSITreeCurrentFile", { bg = "#3b4261", bold = true })
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
 
