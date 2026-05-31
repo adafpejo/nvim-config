@@ -122,20 +122,19 @@ function Renderer:render(bufnr, nodes, winid)
       git_status_prefix = ""
     end
 
-    -- For directories that contain git changes, use purple for the directory name + [DMA] postfix
-    -- (overrides any green/yellow/red from aggregated status, including red from deletions)
+    -- For directories that contain git changes, color the directory name purple
+    -- and render the git summary as individual colored letters (A=green, M=orange, D=red) without brackets
     if (node.type == "directory" or node.type == "root") and node.git_status_summary then
       git_status_prefix = ""
       status_hl = nil
-      name_hl = "Special" -- purple for any directory touched by git
+      name_hl = "Special" -- purple for directory name when it has git changes
     end
 
-    -- Determine highlight color for the inline git detail
-    -- For directories with changes: purple ("Special") for the [DMA] postfix
-    -- (For files the +N-M is always split-colored green/red in the highlight pass below)
+    -- Determine whether we need special git detail coloring
+    -- For directories: we use per-letter colors (A=green, M=orange, D=red)
     local detail_hl = nil
     if node.git_status_summary then
-      detail_hl = "Special" -- purple for directories containing git changes
+      detail_hl = "Special"
     end
 
     if node.type == "root" or node.type == "directory" then
@@ -165,7 +164,7 @@ function Renderer:render(bufnr, nodes, winid)
     local gap = " "
     local base_content = indent .. arrow .. icon .. gap .. node.name
 
-    -- Git detail: +N-M for files, [DMA] postfix for directories
+    -- Git detail: +N-M for files, AMD letters for directories (no brackets)
     local detail = ""
     if node.type == "file" and node.git_numstat then
       local a = tonumber(node.git_numstat.added) or 0
@@ -174,7 +173,7 @@ function Renderer:render(bufnr, nodes, winid)
         detail = string.format(" +%d-%d", a, d)
       end
     elseif (node.type == "directory" or node.type == "root") and node.git_status_summary then
-      detail = " [" .. node.git_status_summary .. "]"
+      detail = " " .. node.git_status_summary
     end
     if detail ~= "" then
       base_content = base_content .. detail
@@ -251,13 +250,33 @@ function Renderer:render(bufnr, nodes, winid)
           })
         end
       elseif detail_hl then
-        -- Directories (and any future non-numstat cases): single color (usually purple "Special")
-        table.insert(highlights, {
-          hl = detail_hl,
-          line = i - 1,
-          col_start = detail_start,
-          col_end = detail_start + #detail,
-        })
+        if node.git_status_summary then
+          -- Per-letter coloring for directory git summary: A(green), M(orange), D(red)
+          local summary = node.git_status_summary
+          for j = 1, #summary do
+            local letter = summary:sub(j, j)
+            local hl = (letter == "A" and "BSITreeGitAdded")
+                    or (letter == "M" and "BSITreeGitModified")
+                    or (letter == "D" and "BSITreeGitDeleted")
+                    or "Special"
+
+            local letter_col = detail_start + 1 + (j - 1)  -- after the leading space
+            table.insert(highlights, {
+              hl = hl,
+              line = i - 1,
+              col_start = letter_col,
+              col_end = letter_col + 1,
+            })
+          end
+        else
+          -- Fallback for other directory cases (single color)
+          table.insert(highlights, {
+            hl = detail_hl,
+            line = i - 1,
+            col_start = detail_start,
+            col_end = detail_start + #detail,
+          })
+        end
       end
     end
   end
