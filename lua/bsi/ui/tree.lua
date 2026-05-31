@@ -55,6 +55,14 @@ function Renderer:render(bufnr, nodes, winid)
     end
   end
 
+  -- Cursor line inside this tree buffer (for live cursor highlighting)
+  local cursor_line = -1
+  local cur_win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_is_valid(cur_win) and vim.api.nvim_win_get_buf(cur_win) == bufnr then
+    local pos = vim.api.nvim_win_get_cursor(cur_win)
+    cursor_line = pos[1] - 1  -- 0-based
+  end
+
   for i, node in ipairs(nodes) do
     local indent = string.rep(" ", node.depth)
     local arrow = "  "
@@ -196,6 +204,11 @@ function Renderer:render(bufnr, nodes, winid)
 
     if is_current then
       table.insert(highlights, { hl = "BSITreeCurrentFile", line = i - 1, col_start = 0, col_end = -1 })
+    end
+
+    -- Highlight the line under the cursor (full line)
+    if cursor_line == (i - 1) then
+      table.insert(highlights, { hl = "BSITreeCursorLine", line = i - 1, col_start = 0, col_end = -1 })
     end
 
     local current_col = #indent
@@ -831,6 +844,7 @@ function Tree:open()
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_file() end, "Open file")
   map("d", function() self:_diff_file() end, "Diff file")
+  map("u", function() self:rename_or_move() end, "Rename / Move file or directory")
   map("y", function() self:_yank(false) end, "Yank name")
   map("Y", function() self:_yank(true) end, "Yank relative path")
   map("<LeftMouse>", "<LeftMouse>", "Move cursor")
@@ -942,6 +956,104 @@ function Tree:_yank(full)
   vim.schedule(function() vim.fn.setreg("+", text) end)
 end
 
+--- Internal: robustly move or rename a path (handles directories with contents)
+---@param src string
+---@param dst string
+---@return boolean success
+---@return string|nil error
+function Tree:_move_path(src, dst)
+  local stat = vim.loop.fs_stat(src)
+  if not stat then
+    return false, "Source does not exist"
+  end
+
+  -- Fast path: try atomic rename first
+  local ok, err = vim.loop.fs_rename(src, dst)
+  if ok then
+    return true
+  end
+
+  -- Ensure parent directory of destination exists (important for moves into new folders)
+  vim.fn.mkdir(vim.fn.fnamemodify(dst, ":h"), "p")
+
+  -- For files, try copy + delete as fallback (e.g. cross-device move)
+  if stat.type == "file" then
+    local content = vim.fn.readfile(src, "b")
+    vim.fn.writefile(content, dst, "b")
+    vim.loop.fs_unlink(src)
+    return true
+  end
+
+  -- Directory: recursive move
+  if stat.type == "directory" then
+    -- Ensure parent directory of destination exists
+    vim.fn.mkdir(vim.fn.fnamemodify(dst, ":h"), "p")
+
+    -- Create destination directory
+    if not vim.loop.fs_stat(dst) then
+      local mkdir_ok = vim.loop.fs_mkdir(dst, 493) -- 0755
+      if not mkdir_ok then
+        return false, "Failed to create destination directory"
+      end
+    end
+
+    -- Move all children recursively
+    local handle = vim.loop.fs_scandir(src)
+    if handle then
+      while true do
+        local name, _ = vim.loop.fs_scandir_next(handle)
+        if not name then break end
+        local child_src = src .. "/" .. name
+        local child_dst = dst .. "/" .. name
+        local success, move_err = self:_move_path(child_src, child_dst)
+        if not success then
+          return false, move_err
+        end
+      end
+    end
+
+    -- Remove the now-empty source directory
+    vim.loop.fs_rmdir(src)
+    return true
+  end
+
+  return false, "Unsupported file type: " .. stat.type
+end
+
+--- Rename or move the node under the cursor (like nvim-tree "u" / rename)
+function Tree:rename_or_move()
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local node = self.visible_nodes[cursor[1]]
+
+  if not node or node.type == "root" then
+    vim.notify("Cannot rename/move the root", vim.log.levels.WARN)
+    return
+  end
+
+  local current = node.path
+
+  vim.ui.input({
+    prompt = "New path: ",
+    default = current,
+    completion = "file",
+  }, function(new_path)
+    if not new_path or new_path == "" or new_path == current then
+      return
+    end
+
+    local success, err = self:_move_path(current, new_path)
+    if not success then
+      vim.notify("Failed to move/rename: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+
+    vim.notify(string.format("Moved/Renamed:\n  %s\n→ %s", current, new_path), vim.log.levels.INFO)
+    self:refresh()
+  end)
+end
+
 --- Locates a specific file path in the tree, expanding directories as needed to make it visible
 ---@param target_path string The absolute path of the file to find
 function Tree:find_file(target_path)
@@ -1028,6 +1140,7 @@ function M.setup(opts)
 
   vim.api.nvim_set_hl(0, "BSITreeCurrentFile", { bg = "#3b4261", bold = true })
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
+  vim.api.nvim_set_hl(0, "BSITreeCursorLine", { bg = "#2e3a4a" })  -- cursor line inside the tree (full line)
 
   -- Git change type colors for inline file detail (+N-M)
   -- bg = "NONE" prevents interference with the current-file background highlight
@@ -1063,6 +1176,20 @@ function M.setup(opts)
     group = group,
     callback = function()
       for _, tree in pairs(M.instances) do tree:render() end
+    end,
+  })
+
+  -- Live cursor line highlight inside the tree
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    group = group,
+    callback = function(args)
+      local buf = args.buf
+      if vim.bo[buf].filetype == "Tree" then
+        local tree = M.instances[buf]
+        if tree and tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
+          tree:render()
+        end
+      end
     end,
   })
 
