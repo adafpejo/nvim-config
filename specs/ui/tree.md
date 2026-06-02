@@ -133,6 +133,7 @@ These are synthesized by the Provider during aggregation:
 - `o`: open file in the window to the right (`wincmd l`)
 - `a`: add a new file in the selected directory (supports nested paths)
 - `r` / `u`: rename or move the selected file/directory
+- `g`: toggle git-changes-only view (same buffer; re-scans to show only modified/untracked)
 - `d`: open `DiffviewOpen -- <file>`
 - `y` / `Y`: yank name or relative path (also to `+` register)
 - `R`: refresh
@@ -154,10 +155,12 @@ t:open()
 -- Programmatic control
 t:refresh()
 t:find_file("/absolute/path/to/file.lua")
+t:toggle_git_mode()        -- switch this tree instance to/from git-changes view (same buffer)
 t:get_root_path()          -- "~/projects/foo"
 
 -- Global helpers
-tree.toggle_tree()         -- open or close the last tree
+tree.toggle_tree()         -- open or close the (current mode) tree
+tree.show_in_git_mode()    -- ensure visible + switch to git mode (for <leader>ge)
 tree.get_root_path(bufnr)  -- read vim.b[bufnr].bsi_tree_root
 tree.instances             -- table<bufnr, Tree> of all live trees
 ```
@@ -187,13 +190,16 @@ All are buffer-local and silent.
 | `d`          | `DiffviewOpen -- <file>`            |
 | `a`          | Add new file in selected directory  |
 | `r` / `u`    | Rename / Move file or directory     |
+| `g`          | Toggle git-changes view (same buffer) |
 | `y`          | Yank filename                       |
 | `Y`          | Yank path relative to tree root     |
 | `<LeftMouse>`| Select node (move cursor)           |
 | `<2-LeftMouse>` | Open file / Toggle directory     |
 
 Global:
-- `<leader>et` → `M.toggle_tree()`
+- `<leader>ee` → `M.toggle_tree()` (toggle tree visibility; current view mode is preserved)
+- `<leader>ge` → `M.show_in_git_mode()` (ensure tree visible + switch to git-changes view in the *same buffer*)
+- Inside tree: `g` → `toggle_git_mode()` (switch between full tree and git-changes view, like a mode toggle)
 - `:BSITree [dir]` → open a tree rooted at the given directory (or cwd)
 
 ---

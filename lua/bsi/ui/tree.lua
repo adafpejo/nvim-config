@@ -325,13 +325,19 @@ function Provider.new() return setmetatable({}, Provider) end
 ---@param root string The directory to check for git status
 ---@return table|nil A map of file paths to their git status information
 function Provider:_get_git_changes(root)
-  root = root:gsub("/$", "")
-  local git_root_cmd = "git -C " .. vim.fn.shellescape(root) .. " rev-parse --show-toplevel 2>/dev/null"
+  -- Normalize the requested tree root
+  local req_root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+  -- Resolve symlinks (important on macOS where /var -> /private/var)
+  req_root = vim.fn.resolve(req_root):gsub("/$", "")
+
+  local git_root_cmd = "git -C " .. vim.fn.shellescape(req_root) .. " rev-parse --show-toplevel 2>/dev/null"
   local handle_root = io.popen(git_root_cmd)
   if not handle_root then return nil end
   local git_root = handle_root:read("*l")
   handle_root:close()
   if not git_root or git_root == "" then return nil end
+  git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
+  git_root = vim.fn.resolve(git_root):gsub("/$", "")
 
   local cmd = "git -C " .. vim.fn.shellescape(git_root) .. " status --porcelain"
   local handle = io.popen(cmd)
@@ -342,7 +348,12 @@ function Provider:_get_git_changes(root)
   if result == "" then return nil end
 
   local changes = {}
-  changes[root] = { status = "dir" }
+  changes[git_root] = { status = "dir" }
+
+  -- Helper: is this path under the user's requested tree root?
+  local function under_req(p)
+    return p == req_root or p:sub(1, #req_root + 1) == req_root .. "/"
+  end
 
   for line in result:gmatch("[^\r\n]+") do
     local status = line:sub(1, 2)
@@ -356,7 +367,9 @@ function Provider:_get_git_changes(root)
     if status == "??" and vim.fn.isdirectory(fullpath) == 1 then
         -- We need to list all files in this untracked directory and mark them as untracked
         local function mark_untracked(p)
-            changes[p] = { status = "??" }
+            if under_req(p) then
+              changes[p] = { status = "??" }
+            end
             local h = vim.loop.fs_scandir(p)
             if h then
                 while true do
@@ -366,21 +379,23 @@ function Provider:_get_git_changes(root)
                     if type == "directory" then
                         mark_untracked(fp)
                     else
-                        changes[fp] = { status = "??" }
+                        if under_req(fp) then
+                          changes[fp] = { status = "??" }
+                        end
                     end
                 end
             end
         end
         mark_untracked(fullpath)
     else
-        if fullpath == root or fullpath:sub(1, #root + 1) == root .. "/" then
+        if under_req(fullpath) then
           changes[fullpath] = { status = status }
           local current = fullpath
-          while #current > #root do
+          while #current > #git_root do
             current = vim.fn.fnamemodify(current, ":h")
             if not changes[current] then changes[current] = { status = "dir" }
             elseif changes[current].status ~= "dir" then break end
-            if current == root then break end
+            if current == git_root then break end
           end
         end
     end
@@ -740,7 +755,8 @@ function Tree.new(opts)
   local self = setmetatable({}, Tree)
   self.provider = Provider.new()
   self.renderer = Renderer.new()
-  self.root_path = opts.root or vim.fn.getcwd()
+  local raw_root = opts.root or vim.fn.getcwd()
+  self.root_path = vim.fn.resolve(vim.fn.fnamemodify(raw_root, ":p")):gsub("/$", "")
   self.opts = opts
   -- Per-instance option takes precedence, otherwise fall back to global config (default true)
   if opts.show_ignored ~= nil then
@@ -759,6 +775,13 @@ function Tree.new(opts)
   self._git_numstats = scan_opts.git_numstats
   local root_node = self.provider:scan(self.root_path, 0, scan_opts)
   self.state = { root = root_node or { id = self.root_path, name = vim.fn.fnamemodify(self.root_path, ":t"), path = self.root_path, type = "root", depth = 0, expanded = true, children = {} } }
+
+  -- For git-only views (used by <leader>ge and layout u2), auto-expand directories that
+  -- contain changes so the user immediately sees the modified / untracked files.
+  if opts.git_only then
+    self:_expand_changed_dirs()
+  end
+
   self.bufnr = opts.bufnr
   self.winid = opts.winid
   return self
@@ -820,11 +843,8 @@ function Tree:open()
   if is_new_win then vim.api.nvim_win_set_width(self.winid, 40) end
   self:render()
 
-  -- Set winbar with root name (consistent with u2 layout style)
-  local ok, ctx = pcall(require, "bsi.ui.context")
-  if ok and ctx.render_title then
-    vim.wo[self.winid].winbar = ctx.render_title(self:get_root_path())
-  end
+  -- Set winbar (will be "Git: ..." if in git mode)
+  self:_update_winbar()
 
   local map = function(lhs, rhs, desc)
     vim.keymap.set("n", lhs, rhs, { buffer = self.bufnr, silent = true, desc = "Tree: " .. desc })
@@ -844,6 +864,7 @@ function Tree:open()
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_file() end, "Open file")
   map("d", function() self:_diff_file() end, "Diff file")
+  map("g", function() self:toggle_git_mode() end, "Toggle git changes view (same buffer)")
   map("a", function() self:_add_file() end, "Add new file in current directory")
   map("r", function() self:rename_or_move() end, "Rename / Move file or directory")
   map("u", function() self:rename_or_move() end, "Rename / Move file or directory")
@@ -900,6 +921,56 @@ function Tree:toggle_show_ignored()
   end
 
   self:refresh()
+end
+
+--- Updates the window title (winbar) to reflect current root and view mode (e.g. git).
+function Tree:_update_winbar()
+  local ok, ctx = pcall(require, "bsi.ui.context")
+  if not ok or not ctx or not ctx.render_title then return end
+  if not self.winid or not vim.api.nvim_win_is_valid(self.winid) then return end
+
+  local title = self:get_root_path()
+  if self.opts and self.opts.git_only then
+    title = "Git: " .. title
+  end
+  vim.wo[self.winid].winbar = ctx.render_title(title)
+end
+
+--- Toggles between full filesystem view and git-changes-only view (same buffer, like normal/insert mode).
+function Tree:toggle_git_mode()
+  self.opts = self.opts or {}
+  self.opts.git_only = not (self.opts.git_only or false)
+
+  -- Clear git caches so status is re-queried for the new mode
+  if self.provider then
+    self.provider._ignored_cache = {}
+    self.provider._git_root = nil
+  end
+
+  self:refresh()
+
+  if self.opts.git_only then
+    self:_expand_changed_dirs()
+    self:render()
+  end
+
+  self:_update_winbar()
+end
+
+--- Internal: expand directories that have git changes (used for git mode UX).
+function Tree:_expand_changed_dirs()
+  local function expand_changed(node)
+    local has_change = node.git_status
+      or (node.git_status_summary and node.git_status_summary ~= "")
+      or (node.git_numstat and ((node.git_numstat.added or 0) + (node.git_numstat.deleted or 0) > 0))
+    if has_change and (node.type == "directory" or node.type == "root") then
+      node.expanded = true
+    end
+    if node.children then
+      for _, child in ipairs(node.children) do expand_changed(child) end
+    end
+  end
+  expand_changed(self.state.root)
 end
 
 --- Toggles the expansion state of the directory under the cursor or opens the file
@@ -1254,7 +1325,7 @@ function M.get_root_path(bufnr)
   return vim.b[bufnr].bsi_tree_root
 end
 
---- Toggles the visibility of the BSI tree window
+--- Toggles the visibility of the BSI tree window (the same tree buffer; mode is independent).
 function M.toggle_tree()
   local found_win = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -1269,6 +1340,35 @@ function M.toggle_tree()
     vim.api.nvim_win_close(found_win, true)
   else
     M.new():open()
+  end
+end
+
+--- Ensures a BSI tree is visible and switched to git-changes mode (same buffer, like a view mode).
+--- If no tree is open, opens one directly in git mode.
+--- Mapped to <leader>ge.
+function M.show_in_git_mode()
+  local found_win = nil
+  local found_buf = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.bo[buf].filetype == "Tree" then
+      found_win = win
+      found_buf = buf
+      break
+    end
+  end
+
+  if found_win and found_buf then
+    local t = M.instances[found_buf]
+    if t then
+      if not (t.opts and t.opts.git_only) then
+        t:toggle_git_mode()
+      end
+      vim.api.nvim_set_current_win(found_win)
+    end
+  else
+    local t = M.new({ git_only = true })
+    t:open()
   end
 end
 

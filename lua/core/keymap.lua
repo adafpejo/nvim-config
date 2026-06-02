@@ -94,6 +94,13 @@ vim.keymap.set("n", "<leader>ee", function()
     require("bsi.ui.tree").toggle_tree()
 end, { noremap = true, desc = "Toggle BSI Tree" })
 
+-- BSI Tree git mode: switches the *same* tree buffer to git-changes-only view
+-- (like a mode switch, analogous to normal/insert). All tree features (a/r, clicks, C-j/C-k etc.) work.
+-- If no tree is visible, opens one in git mode.
+vim.keymap.set("n", "<leader>ge", function()
+    require("bsi.ui.tree").show_in_git_mode()
+end, { noremap = true, desc = "BSI Tree: switch to git changes view" })
+
 -- telescope keymap
 -- set keymaps
 vim.keymap.set("n", "<leader><leader>", "<cmd>Telescope find_files<cr>", { noremap = true, desc = "Fuzzy find files in cwd" })
