@@ -9,6 +9,12 @@ M.instances = {}
 -- This ensures ee/ge always operate on the same dedicated tree buffer (mode can still be switched with 'g' inside).
 M.the_tree = nil
 
+-- Tracked "opened buffer": the single main editing buffer the user is working with.
+-- (User works only with one buffer at a time for editing.)
+-- Used for current-file highlighting in trees and find_file syncing, instead of
+-- scanning all windows (avoids picking tree buffers or wrong splits when focused on tree).
+M.opened_buffer = nil
+
 --- Default configuration for the tree
 M.config = {
   -- Whether to show hidden (dot) files/directories and git-ignored files by default.
@@ -49,15 +55,10 @@ function Renderer:render(bufnr, nodes, winid)
   local lines = {}
   local highlights = {}
 
-  -- Get current active file path to highlight it
-  local current_file = ""
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    if vim.bo[buf].buftype == "" and vim.api.nvim_buf_get_name(buf) ~= "" then
-      current_file = vim.api.nvim_buf_get_name(buf)
-      break
-    end
-  end
+  -- Use the tracked opened buffer (the single one the user works with).
+  -- This is set in setup's BufEnter and is reliable even when the tree sidebar
+  -- itself is focused (avoids the old window scan picking the tree buf or wrong split).
+  local current_file = M.get_opened_file()
 
   -- Cursor line inside this tree buffer (for live cursor highlighting)
   local cursor_line = -1
@@ -977,6 +978,15 @@ function Tree:toggle_git_mode()
 
   self:render()
   self:_update_winbar()
+
+  -- After switching view mode (e.g. from git back to full/"ee" mode), try to
+  -- position the tree's cursor/selection on the currently opened file, if it's
+  -- visible in the new mode. This keeps the "focus" in the tree on the user's
+  -- work file. find_file only sets cursor inside the tree win (no global focus change).
+  local opened_path = M.get_opened_file()
+  if opened_path ~= "" then
+    self:find_file(opened_path)
+  end
 end
 
 --- Internal: expand directories that have git changes (used for git mode UX).
@@ -1383,6 +1393,14 @@ function M.toggle_tree()
   local t = M.new()
   t:open()
   M.the_tree = t
+
+  -- Position on the opened file (so the tree selection is on it), then return
+  -- focus to the editing buffer (keep focus on the opened file, not the tree).
+  local opened_path = M.get_opened_file()
+  if opened_path ~= "" then
+    t:find_file(opened_path)
+  end
+  vim.cmd("wincmd l")
 end
 
 --- Ensures a BSI tree is visible and switched to git-changes mode (same buffer, like a view mode).
@@ -1395,7 +1413,10 @@ function M.show_in_git_mode()
     if not (M.the_tree.opts and M.the_tree.opts.git_only) then
       M.the_tree:toggle_git_mode()
     end
-    vim.api.nvim_set_current_win(M.the_tree.winid)
+    -- Do not steal focus here: changing mode on an already-visible tree should
+    -- keep the user's focus on the opened file buffer. The toggle_git_mode above
+    -- already called find_file to position the tree's internal cursor/selection
+    -- on the opened file (if possible in the target mode).
     return
   end
 
@@ -1427,6 +1448,47 @@ function M.show_in_git_mode()
   local t = M.new({ git_only = true })
   t:open()
   M.the_tree = t
+
+  -- Position the (git-mode) tree cursor on the opened file if it's visible
+  -- in git view. Then wincmd l to return focus to the editing buffer / opened file.
+  local opened_path = M.get_opened_file()
+  if opened_path ~= "" then
+    t:find_file(opened_path)
+  end
+  vim.cmd("wincmd l")
+end
+
+--- Set the single tracked "opened buffer" (the main editing buffer the user works with).
+--- We only track normal file buffers (buftype=="", not Tree/GitView, has a name).
+--- This is used by renders for "current file" highlight and by find_file syncing.
+function M.set_opened_buffer(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
+  if vim.bo[bufnr].buftype ~= "" then return end
+  local ft = vim.bo[bufnr].filetype
+  if ft == "Tree" or ft == "GitView" then return end
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name == "" then return end
+  M.opened_buffer = bufnr
+end
+
+--- Get the currently tracked opened buffer (or nil if none/invalid).
+function M.get_opened_buffer()
+  local buf = M.opened_buffer
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    return buf
+  end
+  M.opened_buffer = nil
+  return nil
+end
+
+--- Get the file path of the tracked opened buffer ("" if none).
+function M.get_opened_file()
+  local buf = M.get_opened_buffer()
+  if buf then
+    return vim.api.nvim_buf_get_name(buf) or ""
+  end
+  return ""
 end
 
 --- Initializes global tree settings, highlights, autocommands, and user commands
@@ -1437,6 +1499,11 @@ function M.setup(opts)
   for k, v in pairs(opts) do
     M.config[k] = v
   end
+
+  -- Seed the tracked opened buffer from the current buffer at setup time.
+  -- (User works only with one buffer; this becomes the authoritative "current file"
+  -- for highlighting and find_file in all trees.)
+  M.set_opened_buffer()
 
   vim.api.nvim_set_hl(0, "BSITreeCurrentFile", { bg = "#3b4261", bold = true })
   vim.api.nvim_set_hl(0, "BSITreeOpenedFile", { fg = "#7aa2f7", italic = true })
@@ -1453,6 +1520,11 @@ function M.setup(opts)
     group = group,
     callback = function(args)
       local buf = args.buf
+
+      -- Track the opened buffer (the single main editing buffer).
+      -- This is the authoritative "current file" for trees (avoids picking the tree
+      -- itself or other splits when the user focuses the tree sidebar).
+      M.set_opened_buffer(buf)
 
       -- When focusing the BSI Tree buffer itself, do a full refresh
       -- (re-scan filesystem + git status/numstat, preserve expansion, then render).
@@ -1475,6 +1547,10 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufAdd", "BufDelete", "BufWipeout" }, {
     group = group,
     callback = function()
+      -- Clean up tracked opened buffer if it was deleted/wiped
+      if M.opened_buffer and not vim.api.nvim_buf_is_valid(M.opened_buffer) then
+        M.opened_buffer = nil
+      end
       for _, tree in pairs(M.instances) do tree:render() end
     end,
   })
