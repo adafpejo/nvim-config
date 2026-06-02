@@ -197,9 +197,9 @@ All are buffer-local and silent.
 | `<2-LeftMouse>` | Open file / Toggle directory     |
 
 Global:
-- `<leader>ee` → `M.toggle_tree()` (toggle tree visibility; current view mode is preserved)
-- `<leader>ge` → `M.show_in_git_mode()` (ensure tree visible + switch to git-changes view in the *same buffer*)
-- Inside tree: `g` → `toggle_git_mode()` (switch between full tree and git-changes view, like a mode toggle)
+- `<leader>ee` → `M.toggle_tree()` (toggle visibility of the tracked main tree buffer; mode preserved)
+- `<leader>ge` → `M.show_in_git_mode()` (ensure the main tree buffer is visible + in git-changes mode; always the one buffer)
+- Inside any tree buffer: `g` → `toggle_git_mode()` (fast in-memory filter switch between full and git view on same buffer)
 - `:BSITree [dir]` → open a tree rooted at the given directory (or cwd)
 
 ---

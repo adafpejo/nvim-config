@@ -5,6 +5,10 @@ local M = {}
 
 M.instances = {}
 
+-- "The one" main BSI tree instance for <leader>ee / <leader>ge.
+-- This ensures ee/ge always operate on the same dedicated tree buffer (mode can still be switched with 'g' inside).
+M.the_tree = nil
+
 --- Default configuration for the tree
 M.config = {
   -- Whether to show hidden (dot) files/directories and git-ignored files by default.
@@ -766,7 +770,7 @@ function Tree.new(opts)
   end
   local scan_opts = {
     expand_all = opts.expand_all,
-    git_only = opts.git_only,
+    git_only = false,  -- always build full tree structure for fast mode switching with 'g'
     show_ignored = self.show_ignored,
   }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
@@ -779,6 +783,7 @@ function Tree.new(opts)
   -- For git-only views (used by <leader>ge and layout u2), auto-expand directories that
   -- contain changes so the user immediately sees the modified / untracked files.
   if opts.git_only then
+    self.opts.git_only = true
     self:_expand_changed_dirs()
   end
 
@@ -795,9 +800,12 @@ function Tree:get_root_path() return vim.fn.fnamemodify(self.root_path, ":~") en
 ---@return bsi.Node[]
 function Tree:get_visible_nodes()
   local nodes = {}
+  local git_only = self.opts and self.opts.git_only
   local function walk(node)
     if node.type ~= "root" then
-      table.insert(nodes, node)
+      if not git_only or self:_node_has_git_activity(node) then
+        table.insert(nodes, node)
+      end
     end
     if (node.type == "directory" or node.type == "root") and node.expanded and node.children then
       for _, child in ipairs(node.children) do walk(child) end
@@ -805,6 +813,19 @@ function Tree:get_visible_nodes()
   end
   walk(self.state.root)
   return nodes
+end
+
+--- Returns true if the node participates in git changes (has status or summary or numstat delta).
+function Tree:_node_has_git_activity(node)
+  if not node then return false end
+  if node.git_status and node.git_status ~= "dir" then return true end
+  if node.git_status_summary and node.git_status_summary ~= "" then return true end
+  if node.git_numstat then
+    local a = node.git_numstat.added or 0
+    local d = node.git_numstat.deleted or 0
+    if a + d > 0 then return true end
+  end
+  return false
 end
 
 --- Updates the tree buffer by flattening the state and calling the renderer
@@ -855,6 +876,9 @@ function Tree:open()
     buffer = self.bufnr,
     callback = function()
       M.instances[self.bufnr] = nil
+      if M.the_tree and M.the_tree.bufnr == self.bufnr then
+        M.the_tree = nil
+      end
     end,
   })
 
@@ -890,7 +914,7 @@ function Tree:refresh()
   collect(self.state.root)
   local scan_opts = {
     expand_all = self.opts.expand_all,
-    git_only = self.opts.git_only,
+    git_only = false,  -- always full structure
     show_ignored = self.show_ignored,
   }
   scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
@@ -907,6 +931,11 @@ function Tree:refresh()
   end
   restore(new_root)
   self.state.root = new_root
+
+  if self.opts and self.opts.git_only then
+    self:_expand_changed_dirs()
+  end
+
   self:render()
 end
 
@@ -937,23 +966,16 @@ function Tree:_update_winbar()
 end
 
 --- Toggles between full filesystem view and git-changes-only view (same buffer, like normal/insert mode).
+-- This is fast: just flips the filter flag and re-renders visible nodes; no fs/git re-scan.
 function Tree:toggle_git_mode()
   self.opts = self.opts or {}
   self.opts.git_only = not (self.opts.git_only or false)
 
-  -- Clear git caches so status is re-queried for the new mode
-  if self.provider then
-    self.provider._ignored_cache = {}
-    self.provider._git_root = nil
-  end
-
-  self:refresh()
-
   if self.opts.git_only then
     self:_expand_changed_dirs()
-    self:render()
   end
 
+  self:render()
   self:_update_winbar()
 end
 
@@ -1326,27 +1348,58 @@ function M.get_root_path(bufnr)
 end
 
 --- Toggles the visibility of the BSI tree window (the same tree buffer; mode is independent).
+-- Always targets M.the_tree (or adopts the first Tree found as the one).
 function M.toggle_tree()
+  -- Prefer the tracked one
+  if M.the_tree and M.the_tree.winid and vim.api.nvim_win_is_valid(M.the_tree.winid) then
+    vim.api.nvim_win_close(M.the_tree.winid, true)
+    M.the_tree = nil
+    return
+  end
+
+  -- Adopt or find any existing Tree window
   local found_win = nil
+  local found_buf = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
     if vim.bo[buf].filetype == "Tree" then
       found_win = win
+      found_buf = buf
       break
     end
   end
 
-  if found_win then
+  if found_win and found_buf then
+    local inst = M.instances[found_buf]
+    if inst then
+      M.the_tree = inst
+    end
     vim.api.nvim_win_close(found_win, true)
-  else
-    M.new():open()
+    M.the_tree = nil
+    return
   end
+
+  -- Open a fresh one and track it as the one
+  local t = M.new()
+  t:open()
+  M.the_tree = t
 end
 
 --- Ensures a BSI tree is visible and switched to git-changes mode (same buffer, like a view mode).
 --- If no tree is open, opens one directly in git mode.
+--- Always targets/sets M.the_tree so that <leader>ee and <leader>ge stay on the one buffer.
 --- Mapped to <leader>ge.
 function M.show_in_git_mode()
+  -- If we have a tracked one, use it (switch mode if needed)
+  if M.the_tree and M.the_tree.winid and vim.api.nvim_win_is_valid(M.the_tree.winid) then
+    if not (M.the_tree.opts and M.the_tree.opts.git_only) then
+      M.the_tree:toggle_git_mode()
+    end
+    vim.api.nvim_set_current_win(M.the_tree.winid)
+    return
+  end
+
+  -- Find any existing Tree window and adopt it as the one, then switch to git mode
   local found_win = nil
   local found_buf = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -1361,15 +1414,19 @@ function M.show_in_git_mode()
   if found_win and found_buf then
     local t = M.instances[found_buf]
     if t then
+      M.the_tree = t
       if not (t.opts and t.opts.git_only) then
         t:toggle_git_mode()
       end
       vim.api.nvim_set_current_win(found_win)
     end
-  else
-    local t = M.new({ git_only = true })
-    t:open()
+    return
   end
+
+  -- No tree at all: open fresh in git mode and track as the one
+  local t = M.new({ git_only = true })
+  t:open()
+  M.the_tree = t
 end
 
 --- Initializes global tree settings, highlights, autocommands, and user commands
