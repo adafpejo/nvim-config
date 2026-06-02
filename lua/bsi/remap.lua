@@ -2,12 +2,12 @@ local dx          = require("bsi.dx")
 local refactoring = require("bsi.refactoring")
 local nvim        = require("bsi.utils.nvim")
 local ai          = require("bsi.ai")
-local nt_api      = require("nvim-tree.api")
 local webify      = require("bsi.webify")
 local ide         = require("bsi.utils.ide")
 local fastgit     = require("bsi.fastgit")
 local multigrep   = require("bsi.multigrep")
 local rglist     = require("bsi.rglist")
+local bsi_tree   = require("bsi.ui.tree")
 
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
@@ -27,64 +27,26 @@ vim.keymap.set('v', 'p', '"_dp', {
     noremap = true,
 })
 
-local function find_file(dir)
-    -- 1. pick navigation function (or error early)
-    local navigate
-    if dir == 'down' then
-        navigate = nvim.move_cursor_down
-    else
-        navigate = nvim.move_cursor_up
+--- Navigate to the next/prev file using the BSI Tree (if one is currently open
+--- as part of a UI layout). Does nothing if no BSI tree window exists.
+---@param dir "down"|"up"
+local function navigate_file(dir)
+  local instances = bsi_tree.instances or {}
+  for _, t in pairs(instances) do
+    if t.winid and vim.api.nvim_win_is_valid(t.winid) then
+      t:navigate_file(dir)
+      return
     end
-
-    navigate()
-
-    -- 2. get the node under cursor
-    local node = nt_api.tree.get_node_under_cursor()
-    if not node then
-        print("NvimTree: Could not find a node under the cursor.")
-        return
-    end
-
-    -- 3. if it's a closed directory, descend to first/last child
-    if node.type == "directory" and not node.open then
-        local current = (dir == "up") and node.parent or node
-
-        -- descend while we're on a directory
-        while current and current.type == "directory" do
-            local children = current.nodes
-            if not children or #children == 0 then
-                break
-            end
-            -- pick first child when going down, last child when going up
-            current = children[(dir == "up") and #children or 1]
-        end
-
-        if current then
-            nt_api.node.open.edit(current)
-        end
-
-        -- 4. if it's a file, just open it
-    elseif node.type == "file" then
-        nt_api.node.open.edit()
-    end
+  end
+  -- No BSI tree visible: do nothing (NvimTree integration has been removed)
 end
 
--- files navigation
+-- files navigation (powered by BSI Tree)
 vim.keymap.set({ "n" }, "<C-j>", function()
-    local visible = nt_api.tree.is_visible()
-    nt_api.tree.open()
-    find_file('down')
-    if not visible then
-        nt_api.tree.close()
-    end
+  navigate_file('down')
 end, { noremap = true, desc = "Open next file" })
 vim.keymap.set({ "n" }, "<C-k>", function()
-    local visible = nt_api.tree.is_visible()
-    nt_api.tree.open()
-    find_file('up')
-    if not visible then
-        nt_api.tree.close()
-    end
+  navigate_file('up')
 end, { noremap = true, desc = "Open prev file" })
 
 -- Basic vim

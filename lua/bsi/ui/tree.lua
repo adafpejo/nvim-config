@@ -844,12 +844,13 @@ function Tree:open()
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_file() end, "Open file")
   map("d", function() self:_diff_file() end, "Diff file")
+  map("a", function() self:_add_file() end, "Add new file in current directory")
+  map("r", function() self:rename_or_move() end, "Rename / Move file or directory")
   map("u", function() self:rename_or_move() end, "Rename / Move file or directory")
   map("y", function() self:_yank(false) end, "Yank name")
   map("Y", function() self:_yank(true) end, "Yank relative path")
-  map("<LeftMouse>", "<LeftMouse>", "Move cursor")
-  map("<LeftRelease>", function() self:toggle() end, "Click to toggle/open")
-  map("<2-LeftMouse>", function() self:toggle() end, "Double click to toggle/open")
+  map("<LeftMouse>", "<LeftMouse>", "Select node")
+  map("<2-LeftMouse>", function() self:toggle() end, "Open file / Toggle directory (double-click)")
 end
 
 --- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
@@ -954,6 +955,55 @@ function Tree:_yank(full)
   vim.fn.setreg('"', text)
   print("tree: Yanked " .. text)
   vim.schedule(function() vim.fn.setreg("+", text) end)
+end
+
+--- Prompts for a filename and creates a new (empty) file under the directory
+--- containing the node under the cursor. Supports nested paths (e.g. "foo/bar.txt").
+function Tree:_add_file()
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local node = self.visible_nodes[cursor[1]]
+  if not node then return end
+
+  local target_dir = (node.type == "directory" or node.type == "root")
+      and node.path
+      or vim.fn.fnamemodify(node.path, ":h")
+
+  vim.ui.input({
+    prompt = "New file (in " .. vim.fn.fnamemodify(target_dir, ":~:.") .. "): ",
+  }, function(name)
+    if not name or name == "" then return end
+
+    local new_path = vim.fs.normalize(target_dir .. "/" .. name)
+
+    -- Create parent directories if the user typed a nested path
+    local parent = vim.fn.fnamemodify(new_path, ":h")
+    if vim.fn.isdirectory(parent) == 0 then
+      vim.fn.mkdir(parent, "p")
+    end
+
+    if vim.fn.filereadable(new_path) == 1 then
+      vim.notify("File already exists: " .. new_path, vim.log.levels.WARN)
+      return
+    end
+
+    local fd = io.open(new_path, "w")
+    if not fd then
+      vim.notify("Failed to create file: " .. new_path, vim.log.levels.ERROR)
+      return
+    end
+    fd:close()
+
+    self:refresh()
+    self:find_file(new_path)
+
+    -- Switch to main window and open the new file
+    vim.schedule(function()
+      vim.cmd("wincmd l")
+      vim.cmd("edit " .. vim.fn.fnameescape(new_path))
+    end)
+  end)
 end
 
 --- Internal: robustly move or rename a path (handles directories with contents)
@@ -1096,6 +1146,99 @@ function Tree:find_file(target_path)
       end
       break
     end
+  end
+end
+
+--- Find the parent of a node by walking the tree (nodes do not store parent refs)
+---@param node bsi.Node
+---@return bsi.Node|nil
+function Tree:_find_parent_node(node)
+  if not node or node.path == self.root_path then return nil end
+
+  local function search(current, target_path)
+    if not current.children then return nil end
+    for _, child in ipairs(current.children) do
+      if child.path == target_path then
+        return current
+      end
+      if child.type == "directory" or child.type == "root" then
+        local found = search(child, target_path)
+        if found then return found end
+      end
+    end
+    return nil
+  end
+
+  return search(self.state.root, node.path)
+end
+
+--- Implements "next/prev file" navigation mirroring the NvimTree <C-j>/<C-k> behavior.
+--- Moves one step in the current visible list, and if landing on a collapsed directory,
+--- descends (first child for down, last child for up) to find a file to open.
+--- Does not mutate expansion state.
+---@param direction "down"|"up"
+function Tree:navigate_file(direction)
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+  if not self.winid or not vim.api.nvim_win_is_valid(self.winid) then return end
+
+  local cursor = vim.api.nvim_win_get_cursor(self.winid)
+  local idx = cursor[1]
+
+  if direction == "down" then
+    idx = math.min(idx + 1, #self.visible_nodes)
+  else
+    idx = math.max(idx - 1, 1)
+  end
+
+  vim.api.nvim_win_set_cursor(self.winid, { idx, 0 })
+
+  local node = self.visible_nodes[idx]
+  if not node then return end
+
+  local target = node
+
+  if node.type == "directory" and not node.expanded then
+    local current = (direction == "up") and self:_find_parent_node(node) or node
+
+    while current and (current.type == "directory" or current.type == "root") do
+      if not current.children or #current.children == 0 then
+        -- lazy populate if somehow empty (defensive)
+        local scan_opts = {
+          git_changes = self._git_changes,
+          git_numstats = self._git_numstats,
+          show_ignored = self.show_ignored,
+        }
+        local scanned = self.provider:scan(current.path, current.depth, scan_opts)
+        if scanned and scanned.children then
+          current.children = scanned.children
+        end
+      end
+      local children = current.children or {}
+      if #children == 0 then
+        break
+      end
+      current = children[(direction == "up") and #children or 1]
+    end
+
+    if current then
+      target = current
+    end
+  end
+
+  if target and target.type == "file" then
+    -- Ensure we are operating from the tree window (required for wincmd l in _open_file)
+    if vim.api.nvim_get_current_win() ~= self.winid then
+      vim.api.nvim_set_current_win(self.winid)
+    end
+    -- Best-effort: position cursor on the target if it is currently visible
+    for i, n in ipairs(self.visible_nodes) do
+      if n.path == target.path then
+        pcall(vim.api.nvim_win_set_cursor, self.winid, { i, 0 })
+        break
+      end
+    end
+    self:_open_file()
+    self:render()  -- update cursor line highlight etc in the tree view
   end
 end
 

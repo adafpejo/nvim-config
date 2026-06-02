@@ -129,14 +129,16 @@ These are synthesized by the Provider during aggregation:
 - Manual `R` inside a tree buffer forces a full re-scan + git status refresh while preserving expansion state
 
 ### 12. Actions from the Tree Buffer
-- `<CR>` or click: toggle directory / open file
+- `<CR>`: toggle directory / open file
 - `o`: open file in the window to the right (`wincmd l`)
+- `a`: add a new file in the selected directory (supports nested paths)
+- `r` / `u`: rename or move the selected file/directory
 - `d`: open `DiffviewOpen -- <file>`
 - `y` / `Y`: yank name or relative path (also to `+` register)
 - `R`: refresh
 - `q`: close the tree window
 
-Mouse support: single left-click toggles, double-click toggles/opens.
+Mouse support: single left-click selects the node, double-click opens the file or toggles directories.
 
 ---
 
@@ -183,10 +185,12 @@ All are buffer-local and silent.
 | `<CR>`       | Toggle dir / open file              |
 | `o`          | Open file (focus right window)      |
 | `d`          | `DiffviewOpen -- <file>`            |
+| `a`          | Add new file in selected directory  |
+| `r` / `u`    | Rename / Move file or directory     |
 | `y`          | Yank filename                       |
 | `Y`          | Yank path relative to tree root     |
-| `<LeftMouse>`| Move cursor                         |
-| `<LeftRelease>` / `<2-LeftMouse>` | Toggle / open |
+| `<LeftMouse>`| Select node (move cursor)           |
+| `<2-LeftMouse>` | Open file / Toggle directory     |
 
 Global:
 - `<leader>et` → `M.toggle_tree()`
