@@ -29,7 +29,7 @@ Key characteristics:
 | `Tree`      | High-level orchestrator. Owns state, visible nodes, expansion, refresh, keymaps, and the public instance API |
 | `M` (module) | Factory + global registry (`M.instances`) + setup + `toggle_tree` |
 
-The tree never writes to the filesystem except through explicit user actions (`o`, `d`). All scanning is read-only.
+The tree never writes to the filesystem except through explicit user actions (`a`, `d`, rename). All scanning is read-only.
 
 ---
 
@@ -107,12 +107,13 @@ These are synthesized by the Provider during aggregation:
 
 ### 7. Expansion & Visibility
 - Root and depth < 2 directories start expanded
-- `get_visible_nodes()` performs a depth-first walk respecting the `expanded` flag
-- `render()` does a `vim.deepcopy` of visible nodes and decrements depth by one for display (root is never shown)
+- `get_visible_nodes()` performs a depth-first walk respecting the `expanded` flag (with simple caching across renders when no expansion/root mutation occurred)
+- `render()` flattens to visible list (no deepcopy) and asks Renderer to render; display depth is computed as node.depth-1 inside the renderer (root is filtered before visible list)
 
 ### 8. Lazy Loading
 - When you toggle a directory whose children have never been scanned (`children == {}`), a targeted `Provider:scan` is performed using the cached `_git_changes` / `_git_numstats` from the parent Tree instance
 - Works in both normal mode and `git_only` mode
+- Git-ignored directories (shown when `show_ignored`) use shallow population: only direct children are listed on open; their subdirectories stay as collapsed stubs. This keeps render/scan cost low for massive ignored trees (node_modules, vendor, dist, etc.). Subdirs are populated on-demand when the user explicitly toggles them. No blanket "expand all" under ignored dirs.
 
 ### 9. Git-Only Mode (`git_only = true`)
 - Used by layout "2" (`<leader>u2`)
@@ -120,21 +121,24 @@ These are synthesized by the Provider during aggregation:
 - Only directories and files that have changes (or contain changes) are shown
 
 ### 10. Current File Tracking
-- On every `BufEnter`, every live tree instance calls `find_file()` on the newly entered buffer
+- On `BufEnter` to a *real file buffer*, if the path differs from last synced, every live tree instance calls `find_file()` (guarded to avoid redundant work on help/quickfix/terminals/tree-buf etc.)
 - The tree will expand every ancestor directory as needed and move the cursor to the file
 - The current file row receives the `BSITreeCurrentFile` background highlight
 
 ### 11. Auto-Refresh Triggers
-- `BufAdd`, `BufDelete`, `BufWipeout` → all live trees re-render (cheap, just re-flattens + redraws)
+- `BufAdd`, `BufDelete`, `BufWipeout` → all live trees re-render (now lighter: often cache hit on visible list, no deepcopy)
+- BufEnter on the tree buffer itself → only cheap `render()` (no full refresh/git rescan)
 - Manual `R` inside a tree buffer forces a full re-scan + git status refresh while preserving expansion state
+- Cursor moves inside tree: zero-cost (native cursorline + winhighlight mapped to BSITreeCursorLine)
 
 ### 12. Actions from the Tree Buffer
-- `<CR>`: toggle directory / open file
-- `o`: open file in the window to the right (`wincmd l`)
+- `<CR>`: toggle directory / open file (in editor)
+- `o`: open file/directory with system default app (Finder, Preview, browser, etc.)
 - `a`: add a new file in the selected directory (supports nested paths)
 - `r` / `u`: rename or move the selected file/directory
 - `g`: toggle git-changes-only view (same buffer; re-scans to show only modified/untracked)
-- `d`: open `DiffviewOpen -- <file>`
+- `d`: delete the selected file or directory (with confirmation)
+- `D`: open `DiffviewOpen -- <file>`
 - `y` / `Y`: yank name or relative path (also to `+` register)
 - `R`: refresh
 - `q`: close the tree window
@@ -185,16 +189,17 @@ All are buffer-local and silent.
 |--------------|-------------------------------------|
 | `R`          | Refresh (re-scan + preserve expansion) |
 | `q`          | Close window                        |
-| `<CR>`       | Toggle dir / open file              |
-| `o`          | Open file (focus right window)      |
-| `d`          | `DiffviewOpen -- <file>`            |
+| `<CR>`       | Toggle dir / open file (in editor)  |
+| `o`          | Open with system default app (Finder/Preview/etc) |
+| `d`          | Delete file or directory (confirm)  |
+| `D`          | `DiffviewOpen -- <file>`            |
 | `a`          | Add new file in selected directory  |
 | `r` / `u`    | Rename / Move file or directory     |
 | `g`          | Toggle git-changes view (same buffer) |
 | `y`          | Yank filename                       |
 | `Y`          | Yank path relative to tree root     |
 | `<LeftMouse>`| Select node (move cursor)           |
-| `<2-LeftMouse>` | Open file / Toggle directory     |
+| `<2-LeftMouse>` | Open file (editor) / Toggle directory |
 
 Global:
 - `<leader>ee` → `M.toggle_tree()` (toggle visibility of the tracked main tree buffer; mode preserved)
@@ -231,6 +236,8 @@ The tree defines these custom highlight groups (set in `M.setup()`):
 - `BSITreeGitAdded` (green) — used for the `+NN` part of file deltas
 - `BSITreeGitModified` (orange) — available for filename highlighting on modifications
 - `BSITreeGitDeleted` (red) — used for the `-MM` part of file deltas
+- `BSITreeGitIgnored` (grey) — used for git-ignored files/dirs when shown
+- `BSITreeGitIgnored` (grey) — used for files and directories that match .gitignore (when `show_ignored=true`)
 
 It also uses `"Special"` (purple) for directories that contain any git changes (both the directory name and the `[DMA]` postfix). The filename text still uses the colorscheme's `Diagnostic*` groups via `name_hl`.
 
@@ -243,6 +250,7 @@ It also uses `"Special"` (purple) for directories that contain any git changes (
 - `print()` is still used for yank feedback (should be `vim.notify`).
 - No horizontal scrolling help; very deep trees or extremely long names can become hard to read.
 - The module assumes a Unix-like environment (forward slashes, `git` in PATH).
+- Cursor movement inside the tree uses native `cursorline` + `winhighlight` (no render cost). Full re-render (visible walk + buf_set_lines + highlights) only happens on structural changes (toggle/expand/find/refresh) or when the tracked opened file changes.
 - `BSITreeOpenedFile` highlight group exists but does nothing (the feature was commented out).
 - Multiple simultaneous trees on different roots are supported via `M.instances`, but only the most recently focused one receives `BufEnter` auto-follow in some edge cases.
 

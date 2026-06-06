@@ -1,4 +1,4 @@
-local dx = require "bsi.dx"
+local system = require("bsi.system")
 
 -- setup
 require("nvim-tree").setup({
@@ -49,7 +49,7 @@ require("nvim-tree").setup({
         -- Open with system default app (Finder, browser, PDF viewer, etc.)
         map("o", function()
             local node = api.tree.get_node_under_cursor()
-            if node then dx.open_url(node.absolute_path) end
+            if node then system.open_url(node.absolute_path) end
         end, "Open with System (Browser/Finder)")
 
         -- macOS: “Reveal in Finder”
@@ -61,7 +61,7 @@ require("nvim-tree").setup({
                 vim.fn.jobstart({ "open", "-R", node.absolute_path }, { detach = true })
             else
                 -- Fallback: just open with system handler on non-macOS
-                dx.open_url(node.absolute_path)
+                system.open_url(node.absolute_path)
             end
         end, "Reveal in Finder")
     end,

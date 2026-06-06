@@ -1,7 +1,7 @@
-local nvim  = require("bsi.utils.nvim")
-local async = require("bsi.utils.async")
-local git   = require("bsi.git")
-local dx    = require("bsi.dx")
+local nvim   = require("bsi.utils.nvim")
+local async  = require("bsi.utils.async")
+local git    = require("bsi.git")
+local system = require("bsi.system")
 
 local M     = {}
 
@@ -18,7 +18,7 @@ function M.open_git_repo()
     assert(#remote_url > 0, "Failed to get remote origin")
 
     local remote_url_https = git.convert_remote_to_https(remote_url)
-    dx.open_url(remote_url_https)
+    system.open_url(remote_url_https)
 end
 
 --- Opens the current commit in the Git repository web interface
@@ -32,7 +32,7 @@ function M.open_git_commit()
     local remote_url_https = git.convert_remote_to_https(remote_url)
     local commit_url = string.format("%s/-/commit/%s", remote_url_https, commit_hash)
 
-    dx.open_url(commit_url)
+    system.open_url(commit_url)
 end
 
 --- Opens the current file at the current line in the Git repository web interface
@@ -59,7 +59,7 @@ function M.open_git_commit_blame()
     -- Assuming GitLab or similar; adjust for GitHub if needed
     local line_url = string.format("%s/-/blob/%s/%s#L%d", remote_url_https, commit_hash, relative_file_path, line_number)
 
-    dx.open_url(line_url)
+    system.open_url(line_url)
 end
 
 --- Opens the Git repository pipelines page
@@ -67,7 +67,7 @@ function M.open_git_pipelines()
     local remote_url = assert(git.get_remote_origin())
     local remote_url_https = git.convert_remote_to_https(remote_url)
     local pipelines_url = string.format("%s/-/pipelines", remote_url_https)
-    dx.open_url(pipelines_url)
+    system.open_url(pipelines_url)
 end
 
 function M.open_gitlab_mr()
@@ -77,7 +77,7 @@ function M.open_gitlab_mr()
 
     local mr_url = remote_url_https .. "/-/merge_requests/new?merge_request%5Bsource_branch%5D=" .. current_branch
 
-    dx.open_url(mr_url)
+    system.open_url(mr_url)
 end
 
 --- Open inline input one string
@@ -133,6 +133,20 @@ function M.open_inline_input()
     vim.keymap.set({ "n", "i" }, "<ESC>", close_input, { buffer = buf, noremap = true, silent = true })
 
     return async.co.yield()
+end
+
+--- Highlight the current visual selection in the buffer (uses Search match highlight)
+function M.highlight_visual()
+    vim.schedule(function()
+        nvim.highlight(nvim.get_visual_selection())
+    end)
+end
+
+--- Highlight the word under the cursor in the buffer (uses Search match highlight)
+function M.highlight_cursor_word()
+    vim.schedule(function()
+        nvim.highlight(nvim.get_cursor_word())
+    end)
 end
 
 return M

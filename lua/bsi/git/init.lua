@@ -1,5 +1,10 @@
 local M = {}
 
+-- Remote string handling (parsing, conversion, forge classification, blob URL style)
+-- lives in a dedicated submodule. This keeps the main git module focused on
+-- actually executing git commands and higher-level repo operations.
+M.remote = require("bsi.git.remote")
+
 local function split_string(string)
     local lines = {}
     for s in string:gmatch("[^\r\n]+") do
@@ -89,12 +94,14 @@ function M.get_remote_origin()
     return M.get_remote_url("origin")
 end
 
-function M.convert_remote_to_https(ssh_or_https)
-    -- Convert SSH/HTTPS Git URL to GitLab URL
-    local remote_url = ssh_or_https:gsub("%.git$", "")          -- Remove .git suffix
-    remote_url = remote_url:gsub("git@([^:]+):", "https://%1/") -- Convert SSH to HTTPS
-    return remote_url
-end
+-- Re-export from the dedicated remote submodule for backward compatibility.
+-- New code is encouraged to use git.remote.convert_remote_to_https directly.
+M.convert_remote_to_https = M.remote.convert_remote_to_https
+M.convert_origin_to_https = M.remote.convert_origin_to_https
+M.convert_origin_to_project_name = M.remote.convert_origin_to_project_name
+
+-- Note: the implementations now live in lua/bsi/git/remote.lua
+-- (kept here as thin re-exports so existing call sites do not break).
 
 function M.get_remote_url(remote)
     local output = vim.fn.system { 'git', 'remote', 'get-url', remote }
@@ -106,27 +113,21 @@ function M.get_remote_url(remote)
     end
 end
 
---- @param url string
---- @return string | nil
-function M.convert_origin_to_project_name(url)
-  return url:match("https?://[^/]+/(.+)%.git")
-end
 function M.get_gitlab_project_name()
     local git_origin = M.get_remote_origin()
     assert(git_origin ~= "", "Not found git origin")
 
-    return M.convert_origin_to_project_name(git_origin)
+    return M.remote.convert_origin_to_project_name(git_origin)
 end
 
-function M.get_git_provider()
-    local remote_url = assert(M.get_remote_origin())
-    if string.find(remote_url, "gitlab") then
-        return "gitlab"
-    elseif string.find(remote_url, "github") then
-        return "github"
-    end
-    return nil
-end
+-- Re-export / delegate to the remote submodule.
+-- The real classification + blob style logic lives in bsi.git.remote.
+M.get_git_provider = M.remote.get_git_provider
+
+-- Convenience re-export of the blob path style helper.
+M.get_blob_path_style = M.remote.get_blob_path_style
+M.parse_remote = M.remote.parse
+M.parse_remote_or_nil = M.remote.parse_or_nil
 
 -- Assuming git module has or needs these helpers:
 -- git.get_blame_commit_hash(file_path, line_number)

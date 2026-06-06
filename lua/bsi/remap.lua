@@ -1,13 +1,13 @@
-local dx          = require("bsi.dx")
 local refactoring = require("bsi.refactoring")
 local nvim        = require("bsi.utils.nvim")
 local ai          = require("bsi.ai")
 local webify      = require("bsi.webify")
 local ide         = require("bsi.utils.ide")
+local system      = require("bsi.system")
 local fastgit     = require("bsi.fastgit")
 local multigrep   = require("bsi.multigrep")
-local rglist     = require("bsi.rglist")
-local bsi_tree   = require("bsi.ui.tree")
+local rglist      = require("bsi.rglist")
+local bsi_tree    = require("bsi.ui.tree")
 
 -- Keymaps are automatically loaded on the VeryLazy event
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
@@ -128,9 +128,9 @@ vim.keymap.set("n", "<leader>dd", "<cmd>LazyDocker<cr>", { noremap = true, desc 
 -- Gen.nvim
 vim.keymap.set({ "n", "v" }, "<leader>]", ":Gen<CR>")
 
--- bsi motions
-vim.keymap.set({ "n" }, "<leader>h", dx.highlight_cursor_word, { noremap = true, desc = "Search word in current buffer" })
-vim.keymap.set({ "v" }, "<leader>h", dx.highlight_visual, { noremap = true, desc = "Search word in current buffer" })
+-- bsi motions (highlight matches in buffer)
+vim.keymap.set({ "n" }, "<leader>h", ide.highlight_cursor_word, { noremap = true, desc = "Highlight word in current buffer" })
+vim.keymap.set({ "v" }, "<leader>h", ide.highlight_visual, { noremap = true, desc = "Highlight selection in current buffer" })
 
 -- Telescope
 vim.keymap.set({ "n" }, "fs", multigrep.live_multigrep, { noremap = true, desc = "Search word in current root" })
@@ -140,8 +140,8 @@ vim.api.nvim_create_user_command("RgList", rglist.run, { nargs = "*" })
 -- Webify
 vim.keymap.set("n", "<leader>sw", function()
     local word = nvim.get_cursor_word()
-    dx.search_google(word)
-end, { desc = "Search word under cur" })
+    system.search_google(word)
+end, { desc = "Search word under cursor (Google)" })
 
 -- Function to URL encode a string
 local function url_encode(str)
@@ -157,8 +157,8 @@ end
 vim.keymap.set("v", "<leader>si", function()
     local lines = nvim.get_visual_selection()
     local encodedlines = url_encode(lines)
-    dx.search_google(encodedlines)
-end, { desc = "Search selected block" })
+    system.search_google(encodedlines)
+end, { desc = "Search selected text (Google)" })
 
 vim.keymap.set("n", "<D-s>", ":w<CR>", { noremap = true, silent = true })
 -- Map Cmd+S to save in insert mode
@@ -222,8 +222,8 @@ end)
 
 vim.keymap.set("v", "<leader>s", function()
     local visual = nvim.get_visual_selection()
-    dx.open_url(visual)
-end, { noremap = true })
+    system.open_url(visual)
+end, { noremap = true, desc = "Open visual selection as URL/path with system handler" })
 
 local telescope = require('telescope')
 local actions = require('telescope.actions')

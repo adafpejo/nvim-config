@@ -5,6 +5,13 @@ local M = {}
 
 M.instances = {}
 
+-- One-time namespace for all extmarks (cheaper than create_namespace on every render)
+local ns_id = vim.api.nvim_create_namespace("bsitree")
+
+-- Track last opened file path we synced trees to, to avoid redundant find_file+render
+-- on every BufEnter (only pay when user actually switched main editing file)
+M._last_synced_file = ""
+
 -- "The one" main BSI tree instance for <leader>ee / <leader>ge.
 -- This ensures ee/ge always operate on the same dedicated tree buffer (mode can still be switched with 'g' inside).
 M.the_tree = nil
@@ -23,6 +30,7 @@ M.config = {
 }
 
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+local system = require("bsi.system")
 
 ---@class bsi.Node
 ---@field id string
@@ -60,16 +68,12 @@ function Renderer:render(bufnr, nodes, winid)
   -- itself is focused (avoids the old window scan picking the tree buf or wrong split).
   local current_file = M.get_opened_file()
 
-  -- Cursor line inside this tree buffer (for live cursor highlighting)
-  local cursor_line = -1
-  local cur_win = vim.api.nvim_get_current_win()
-  if vim.api.nvim_win_is_valid(cur_win) and vim.api.nvim_win_get_buf(cur_win) == bufnr then
-    local pos = vim.api.nvim_win_get_cursor(cur_win)
-    cursor_line = pos[1] - 1  -- 0-based
-  end
-
   for i, node in ipairs(nodes) do
-    local indent = string.rep(" ", node.depth)
+    -- Visible nodes never include root; their depth starts at 1 for top-level children.
+    -- Subtract 1 for display indent so first level has no leading spaces.
+    local display_depth = node.depth - 1
+    if display_depth < 0 then display_depth = 0 end
+    local indent = string.rep(" ", display_depth)
     local arrow = "  "
     local icon = ""
     local icon_hl = nil
@@ -150,6 +154,14 @@ function Renderer:render(bufnr, nodes, winid)
       detail_hl = "Special"
     end
 
+    if node.git_ignored then
+      name_hl = "BSITreeGitIgnored"
+      status_hl = nil
+      if icon_hl then
+        icon_hl = "BSITreeGitIgnored"
+      end
+    end
+
     if node.type == "root" or node.type == "directory" then
       if node.expanded then
         if node.children and #node.children == 0 then
@@ -165,7 +177,11 @@ function Renderer:render(bufnr, nodes, winid)
       name_hl = name_hl or "Directory"
     else
       arrow = "  "
-      if has_devicons then
+      if node._icon then
+        icon = node._icon
+        icon_hl = node._icon_hl
+      elseif has_devicons then
+        -- Fallback (should not normally happen)
         local ic, hl = devicons.get_icon(node.name, vim.fn.fnamemodify(node.name, ":e"), { default = true })
         icon = ic
         icon_hl = hl
@@ -211,11 +227,6 @@ function Renderer:render(bufnr, nodes, winid)
       table.insert(highlights, { hl = "BSITreeCurrentFile", line = i - 1, col_start = 0, col_end = -1 })
     end
 
-    -- Highlight the line under the cursor (full line)
-    if cursor_line == (i - 1) then
-      table.insert(highlights, { hl = "BSITreeCursorLine", line = i - 1, col_start = 0, col_end = -1 })
-    end
-
     local current_col = #indent
     local arrow_start = current_col
     local arrow_end = arrow_start + #arrow
@@ -223,6 +234,17 @@ function Renderer:render(bufnr, nodes, winid)
     local icon_start = arrow_end
     local icon_end = icon_start + #icon
     local name_start = icon_end + 1   -- after the space between icon and name
+
+    if node.git_ignored then
+      -- Combine icon + name into single grey hl for ignored items.
+      -- Reduces nvim_buf_add_highlight calls significantly for huge ignored subtrees
+      -- (e.g. node_modules) when user explicitly opens the ignored dir.
+      local content_start = arrow_end
+      local content_end = name_start + #node.name
+      table.insert(highlights, { hl = "BSITreeGitIgnored", line = i - 1, col_start = content_start, col_end = content_end })
+      icon_hl = nil
+      name_hl = nil
+    end
 
     if icon_hl then
       table.insert(highlights, { hl = icon_hl, line = i - 1, col_start = icon_start, col_end = icon_end })
@@ -302,10 +324,9 @@ function Renderer:render(bufnr, nodes, winid)
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
-  local ns = vim.api.nvim_create_namespace("bsitree")
-  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(bufnr, ns, hl.hl, hl.line, hl.col_start, hl.col_end)
+    vim.api.nvim_buf_add_highlight(bufnr, ns_id, hl.hl, hl.line, hl.col_start, hl.col_end)
   end
 
   vim.bo[bufnr].modifiable = false
@@ -516,7 +537,7 @@ function Provider:_is_git_ignored(fullpath)
 
   -- Determine git root (cached)
   if self._git_root == nil then
-    local dir = vim.fn.fnamemodify(fullpath, ":h")
+    local dir = vim.fn.isdirectory(fullpath) == 1 and fullpath or vim.fn.fnamemodify(fullpath, ":h")
     local out = vim.fn.systemlist({ "git", "-C", dir, "rev-parse", "--show-toplevel" })
     if vim.v.shell_error == 0 and out[1] then
       self._git_root = vim.trim(out[1])
@@ -554,6 +575,9 @@ function Provider:scan(path, depth, opts)
 
   local node_gs = (git_changes and git_changes[path] and git_changes[path].status ~= "dir") and git_changes[path].status or nil
 
+  local under_ignored = (opts and opts._under_ignored) or false
+  local this_ignored = under_ignored or self:_is_git_ignored(path)
+
   local node = {
     id = path,
     name = vim.fn.fnamemodify(path, ":t") or path,
@@ -563,6 +587,7 @@ function Provider:scan(path, depth, opts)
     expanded = opts.expand_all or (depth == 0),
     children = {},
     git_status = node_gs,
+    git_ignored = this_ignored,
   }
 
   local children_map = {}
@@ -608,19 +633,70 @@ function Provider:scan(path, depth, opts)
     local numstat = git_numstats and git_numstats[fullpath] or nil
     local child
     if is_dir then
-      child = self:scan(fullpath, depth + 1, opts)
-      if child then
-        if git_only and #child.children == 0 then goto continue end
-        child.expanded = opts.expand_all or false
-      else goto continue end
+      local child_ignored = this_ignored or self:_is_git_ignored(fullpath)
+      local force_full = opts and opts._force_full_ignored_scan or false
+      if not force_full and this_ignored and not opts.expand_all then
+        -- Performance: for git-ignored directories, scan/render only one level deep.
+        -- (Direct children of ignored dir are included; their sub-children are stubbed.)
+        -- When the user toggles an ignored dir we force-list its direct children only;
+        -- their subdirs remain shallow to keep render cost low even for huge trees
+        -- (node_modules, vendor, dist, etc.). Deep expansion only on explicit toggle of subdirs.
+        child = {
+          id = fullpath,
+          name = name,
+          path = fullpath,
+          type = "directory",
+          depth = depth + 1,
+          expanded = false,
+          children = {},
+          git_status = g_status ~= "dir" and g_status or nil,
+          git_numstat = numstat,
+          git_ignored = child_ignored,
+          _shallow_ignored = true,
+        }
+      else
+        local sub_opts = vim.tbl_extend("force", opts or {}, { _under_ignored = this_ignored or child_ignored })
+        if force_full then
+          -- Do not propagate force_full when we are inside an ignored directory.
+          -- This lets the user open a gitignored dir (e.g. node_modules) and see
+          -- its direct children (package dirs) without deeply scanning/rendering
+          -- every subdir inside those packages. Subdirs of ignored stay shallow
+          -- until the user explicitly toggles them.
+          if not this_ignored then
+            sub_opts._force_full_ignored_scan = true
+          end
+        end
+        child = self:scan(fullpath, depth + 1, sub_opts)
+        if child then
+          if git_only and #child.children == 0 then goto continue end
+          child.expanded = opts.expand_all or false
+        else goto continue end
+      end
     else
-      child = { id = fullpath, name = name, path = fullpath, type = "file", depth = depth + 1, expanded = false, children = nil, git_status = g_status ~= "dir" and g_status or nil, git_numstat = numstat }
+      local child_ignored = this_ignored or self:_is_git_ignored(fullpath)
+      child = { id = fullpath, name = name, path = fullpath, type = "file", depth = depth + 1, expanded = false, children = nil, git_status = g_status ~= "dir" and g_status or nil, git_numstat = numstat, git_ignored = child_ignored }
+      -- Precompute icon for files at scan time (used on every rerender for display).
+      -- Moves the devicons lookup cost out of the hot render path.
+      if has_devicons then
+        local ic, hl = devicons.get_icon(name, vim.fn.fnamemodify(name, ":e"), { default = true })
+        child._icon = ic
+        child._icon_hl = hl
+      else
+        child._icon = ""
+      end
     end
     table.insert(node.children, child)
     ::continue::
   end
 
-  if git_changes and node.type == "directory" then
+  if this_ignored and not (opts and opts._force_full_ignored_scan) then
+    node._shallow_ignored = true
+  end
+  -- When force_full was used to open an ignored dir, we still allow the normal
+  -- this_ignored shallow mark to apply to *its children* (because propagation of
+  -- force_full is suppressed under ignored). This keeps subdir renders minimal.
+
+  if git_changes and node.type == "directory" and not node.git_ignored then
     local all_staged, some_staged, some_unstaged, all_untracked = true, false, false, true
     for _, c in ipairs(node.children) do
       local s = c.git_status
@@ -667,7 +743,7 @@ function Provider:scan(path, depth, opts)
   end
 
   -- Build canonical directory summary for postfix [DMA] etc.
-  if git_changes and node.type == "directory" and node.children then
+  if git_changes and node.type == "directory" and node.children and not node.git_ignored then
     local has = { A = false, M = false, D = false }
     local function mark(s)
       if not s then return end
@@ -733,17 +809,24 @@ function Provider:scan(path, depth, opts)
 
   if node.type == "directory" and #node.children == 1 and node.children[1].type == "directory" then
     local child = node.children[1]
-    node.name = node.name .. "/" .. child.name
-    node.children = child.children
-    node.path = child.path
-    node.id = child.id
-    node.git_status = child.git_status
-    node.git_status_summary = child.git_status_summary
-    local function sync_depth(n, d)
-      n.depth = d
-      if n.children then for _, c in ipairs(n.children) do sync_depth(c, d + 1) end end
+    if node.git_ignored or child.git_ignored then
+      -- don't collapse chains under ignored dirs, so the ignored dir name remains as a distinct
+      -- toggle point for user to "open" and trigger full inner render
+    else
+      node.name = node.name .. "/" .. child.name
+      node.children = child.children
+      node.path = child.path
+      node.id = child.id
+      node.git_status = child.git_status
+      node.git_status_summary = child.git_status_summary
+      node.git_ignored = child.git_ignored
+      node._shallow_ignored = child._shallow_ignored
+      local function sync_depth(n, d)
+        n.depth = d
+        if n.children then for _, c in ipairs(n.children) do sync_depth(c, d + 1) end end
+      end
+      if node.children then for _, c in ipairs(node.children) do sync_depth(c, node.depth + 1) end end
     end
-    if node.children then for _, c in ipairs(node.children) do sync_depth(c, node.depth + 1) end end
   end
   return node
 end
@@ -790,6 +873,7 @@ function Tree.new(opts)
 
   self.bufnr = opts.bufnr
   self.winid = opts.winid
+  self._visible_dirty = true
   return self
 end
 
@@ -800,6 +884,13 @@ function Tree:get_root_path() return vim.fn.fnamemodify(self.root_path, ":~") en
 --- Flattens the tree structure into a list of nodes that are currently visible (based on expansion state)
 ---@return bsi.Node[]
 function Tree:get_visible_nodes()
+  -- Use cached list if no structural mutation since last build.
+  -- git_only is a pure filter (no expansion change), so we still re-walk when it flips
+  -- (toggle_git_mode sets dirty), but repeated renders after a cursor move or minor
+  -- are free (no walk, no line rebuild).
+  if self._visible_nodes and not self._visible_dirty then
+    return self._visible_nodes
+  end
   local nodes = {}
   local git_only = self.opts and self.opts.git_only
   local function walk(node)
@@ -813,6 +904,8 @@ function Tree:get_visible_nodes()
     end
   end
   walk(self.state.root)
+  self._visible_nodes = nodes
+  self._visible_dirty = false
   return nodes
 end
 
@@ -833,15 +926,7 @@ end
 function Tree:render()
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then return end
   self.visible_nodes = self:get_visible_nodes()
-  local render_nodes = {}
-  for _, node in ipairs(self.visible_nodes) do
-    local n = vim.deepcopy(node)
-    if n.type ~= "root" then
-      n.depth = n.depth - 1
-    end
-    table.insert(render_nodes, n)
-  end
-  self.renderer:render(self.bufnr, render_nodes, self.winid)
+  self.renderer:render(self.bufnr, self.visible_nodes, self.winid)
 end
 
 --- Opens the tree in a side window, sets up the buffer, and registers keybindings
@@ -863,6 +948,15 @@ function Tree:open()
   pcall(vim.api.nvim_buf_set_name, self.bufnr, "GitView: Tree")
 
   if is_new_win then vim.api.nvim_win_set_width(self.winid, 40) end
+
+  -- Native cursorline + winhighlight gives us the BSITreeCursorLine background
+  -- automatically on cursor moves inside this window with *zero* Lua/render cost.
+  -- (Previously we re-ran full :render() on every CursorMoved just for this.)
+  if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    vim.api.nvim_set_option_value("cursorline", true, { win = self.winid })
+    vim.api.nvim_set_option_value("winhighlight", "CursorLine:BSITreeCursorLine", { win = self.winid })
+  end
+
   self:render()
 
   -- Set winbar (will be "Git: ..." if in git mode)
@@ -887,8 +981,9 @@ function Tree:open()
   map("h", function() self:toggle_show_ignored() end, "Toggle hidden & git-ignored files/dirs")
   map("q", "<cmd>close<cr>", "Close")
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
-  map("o", function() self:_open_file() end, "Open file")
-  map("d", function() self:_diff_file() end, "Diff file")
+  map("o", function() self:_open_system() end, "Open with system default app (Finder/Preview/etc)")
+  map("d", function() self:_delete_node() end, "Delete file or directory (with confirmation)")
+  map("D", function() self:_diff_file() end, "Diff file")
   map("g", function() self:toggle_git_mode() end, "Toggle git changes view (same buffer)")
   map("a", function() self:_add_file() end, "Add new file in current directory")
   map("r", function() self:rename_or_move() end, "Rename / Move file or directory")
@@ -908,8 +1003,15 @@ function Tree:refresh()
   end
 
   local expanded = {}
+  local full_ignored_paths = {}
   local function collect(node)
     if node.expanded then expanded[node.id] = true end
+    -- Track gitignored nodes that have had their (direct) children populated so we
+    -- can re-force a one-level refresh of them on R to pick up new top-level entries.
+    -- We no longer store/restore deep expansion inside them.
+    if node.git_ignored and not node._shallow_ignored then
+      full_ignored_paths[node.id] = true
+    end
     if node.children then for _, child in ipairs(node.children) do collect(child) end end
   end
   collect(self.state.root)
@@ -931,7 +1033,34 @@ function Tree:refresh()
     end
   end
   restore(new_root)
+
+  -- Re-force full population for ignored subtrees that were fully loaded before refresh
+  if next(full_ignored_paths) then
+    local function restore_full_ignored(node)
+      if full_ignored_paths[node.id] and node.git_ignored then
+        local so = {
+          git_changes = self._git_changes,
+          git_numstats = self._git_numstats,
+          show_ignored = self.show_ignored,
+          _force_full_ignored_scan = true,
+        }
+        local sc = self.provider:scan(node.path, node.depth, so)
+        if sc and sc.children then
+          node.children = sc.children
+        end
+        node._shallow_ignored = false
+        -- Do not blanket-expand ignored subtrees on refresh. The normal restore()
+        -- pass (using the collected `expanded` id map) will re-open any directories
+        -- the user had individually expanded. Subdirs under ignored remain minimal
+        -- to avoid expensive re-renders of huge trees like node_modules.
+      end
+      if node.children then for _, child in ipairs(node.children) do restore_full_ignored(child) end end
+    end
+    restore_full_ignored(new_root)
+  end
+
   self.state.root = new_root
+  self._visible_dirty = true
 
   if self.opts and self.opts.git_only then
     self:_expand_changed_dirs()
@@ -971,6 +1100,7 @@ end
 function Tree:toggle_git_mode()
   self.opts = self.opts or {}
   self.opts.git_only = not (self.opts.git_only or false)
+  self._visible_dirty = true
 
   if self.opts.git_only then
     self:_expand_changed_dirs()
@@ -997,12 +1127,28 @@ function Tree:_expand_changed_dirs()
       or (node.git_numstat and ((node.git_numstat.added or 0) + (node.git_numstat.deleted or 0) > 0))
     if has_change and (node.type == "directory" or node.type == "root") then
       node.expanded = true
+      if node.git_ignored and node._shallow_ignored then
+        local so = {
+          git_changes = self._git_changes,
+          git_numstats = self._git_numstats,
+          show_ignored = self.show_ignored,
+          _force_full_ignored_scan = true,
+        }
+        local sc = self.provider:scan(node.path, node.depth, so)
+        if sc and sc.children then
+          node.children = sc.children
+        end
+        node._shallow_ignored = false
+        -- children of this ignored dir are loaded one level; their subdirs remain
+        -- shallow (scan propagation prevents deep force under ignored).
+      end
     end
     if node.children then
       for _, child in ipairs(node.children) do expand_changed(child) end
     end
   end
   expand_changed(self.state.root)
+  self._visible_dirty = true
 end
 
 --- Toggles the expansion state of the directory under the cursor or opens the file
@@ -1012,16 +1158,33 @@ function Tree:toggle()
   local idx = cursor[1]
   local node = self.visible_nodes[idx]
   if not node or node.type == "file" then self:_open_file() return end
-  if not node.expanded and node.type == "directory" and node.children and #node.children == 0 then
-    local scan_opts = {
-      git_changes = self._git_changes,
-      git_numstats = self._git_numstats,
-      show_ignored = self.show_ignored,
-    }
-    local scanned = self.provider:scan(node.path, node.depth, scan_opts)
-    node.children = scanned.children
+  if not node.expanded and node.type == "directory" then
+    local needs_load = (node.children and #node.children == 0) or node._shallow_ignored or node.git_ignored
+    if needs_load then
+      local scan_opts = {
+        git_changes = self._git_changes,
+        git_numstats = self._git_numstats,
+        show_ignored = self.show_ignored,
+      }
+      if node.git_ignored or node._shallow_ignored then
+        scan_opts._force_full_ignored_scan = true
+      end
+      local scanned = self.provider:scan(node.path, node.depth, scan_opts)
+      if scanned and scanned.children then
+        node.children = scanned.children
+        node._shallow_ignored = false
+      end
+    end
   end
+  -- For git_ignored nodes we load direct children above (one level), but do not
+  -- force their subdirs open. This minimizes both scan depth and visible nodes
+  -- during render for large ignored trees. Subdirs under them stay lazy/shallow.
   node.expanded = not node.expanded
+  -- Note: we intentionally do NOT auto-expand descendants under git_ignored nodes.
+  -- Even after force-loading direct children of an ignored dir, child directories
+  -- start collapsed (or as shallow stubs). This keeps the visible node count and
+  -- render cost minimal. User can drill into specific subdirs as needed.
+  self._visible_dirty = true
   self:render()
 end
 
@@ -1036,6 +1199,21 @@ function Tree:_open_file()
   vim.cmd("edit " .. vim.fn.fnameescape(node.path))
 end
 
+--- Opens the node (file or directory) under the cursor using the system's default application
+--- (e.g. Finder/Explorer for directories, default viewer for images/PDFs, browser for HTML, etc.)
+function Tree:_open_system()
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local idx = cursor[1]
+  local node = self.visible_nodes[idx]
+  if not node then return end
+  if system and system.open_url then
+    system.open_url(node.path)
+  else
+    vim.notify("bsi.system not available for system open", vim.log.levels.WARN)
+  end
+end
+
 --- Opens a git diff view for the file under the cursor
 function Tree:_diff_file()
   if not self.visible_nodes or #self.visible_nodes == 0 then return end
@@ -1044,6 +1222,54 @@ function Tree:_diff_file()
   local node = self.visible_nodes[idx]
   if not node or node.type ~= "file" then return end
   vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(node.path))
+end
+
+--- Deletes the node (file or directory) under the cursor after confirmation.
+--- Supports recursive delete for directories.
+function Tree:_delete_node()
+  if not self.visible_nodes or #self.visible_nodes == 0 then return end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local idx = cursor[1]
+  local node = self.visible_nodes[idx]
+  if not node or node.type == "root" then
+    vim.notify("Cannot delete the root", vim.log.levels.WARN)
+    return
+  end
+
+  local path = node.path
+  local is_dir = node.type == "directory"
+  local label = is_dir and "directory" or "file"
+
+  local choice = vim.fn.confirm(
+    "Delete " .. label .. " " .. vim.fn.fnamemodify(path, ":t") .. "?",
+    "&Yes\n&No",
+    2
+  )
+  if choice ~= 1 then
+    return
+  end
+
+  local flags = is_dir and "rf" or ""
+  local deleted = vim.fn.delete(path, flags)
+
+  if deleted == 0 then
+    vim.notify("Deleted " .. label .. ": " .. path, vim.log.levels.INFO)
+
+    -- Clear tracking if this was the opened buffer
+    if M.opened_buffer and vim.api.nvim_buf_get_name(M.opened_buffer) == path then
+      M.opened_buffer = nil
+    end
+
+    -- Force close any buffer for this path
+    local bufnr = vim.fn.bufnr(path)
+    if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+
+    self:refresh()
+  else
+    vim.notify("Failed to delete " .. label .. ": " .. path, vim.log.levels.ERROR)
+  end
 end
 
 --- Yanks the name or relative path of the node under the cursor to the clipboard
@@ -1213,6 +1439,21 @@ function Tree:find_file(target_path)
   if not target_path or target_path == "" then return end
   if target_path:sub(1, #self.root_path) ~= self.root_path then return end
 
+  -- Fast path: if target is already in the current visible list (e.g. same dir area,
+  -- or after prior expansion), just (re)select + render for CurrentFile highlight.
+  -- Avoids full ancestor walk + possible lazy scans on every file switch.
+  if self.visible_nodes then
+    for i, node in ipairs(self.visible_nodes) do
+      if node.path == target_path then
+        if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+          pcall(vim.api.nvim_win_set_cursor, self.winid, { i, 0 })
+        end
+        self:render()
+        return
+      end
+    end
+  end
+
   local function expand_recursive(node, target)
     if node.path == target then return true end
     if node.type == "directory" or node.type == "root" then
@@ -1224,8 +1465,14 @@ function Tree:find_file(target_path)
               git_numstats = self._git_numstats,
               show_ignored = self.show_ignored,
             }
+            if node.git_ignored or node._shallow_ignored then
+              scan_opts._force_full_ignored_scan = true
+            end
             local scanned = self.provider:scan(node.path, node.depth, scan_opts)
-            node.children = scanned.children
+            if scanned and scanned.children then
+              node.children = scanned.children
+              node._shallow_ignored = false
+            end
           end
           node.expanded = true
         end
@@ -1240,12 +1487,13 @@ function Tree:find_file(target_path)
   end
 
   expand_recursive(self.state.root, target_path)
+  self._visible_dirty = true
   self:render()
 
   for i, node in ipairs(self.visible_nodes) do
     if node.path == target_path then
       if self.winid and vim.api.nvim_win_is_valid(self.winid) then
-        vim.api.nvim_win_set_cursor(self.winid, { i, 0 })
+        pcall(vim.api.nvim_win_set_cursor, self.winid, { i, 0 })
       end
       break
     end
@@ -1311,9 +1559,13 @@ function Tree:navigate_file(direction)
           git_numstats = self._git_numstats,
           show_ignored = self.show_ignored,
         }
+        if current.git_ignored or current._shallow_ignored then
+          scan_opts._force_full_ignored_scan = true
+        end
         local scanned = self.provider:scan(current.path, current.depth, scan_opts)
         if scanned and scanned.children then
           current.children = scanned.children
+          current._shallow_ignored = false
         end
       end
       local children = current.children or {}
@@ -1514,6 +1766,7 @@ function M.setup(opts)
   vim.api.nvim_set_hl(0, "BSITreeGitAdded",    { fg = "#9ece6a", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e", bg = "NONE" })
+  vim.api.nvim_set_hl(0, "BSITreeGitIgnored",  { fg = "#5c6370", bg = "NONE" })  -- grey for git-ignored files/dirs when shown via show_ignored
 
   local group = vim.api.nvim_create_augroup("BSITreeTracking", { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {
@@ -1526,20 +1779,32 @@ function M.setup(opts)
       -- itself or other splits when the user focuses the tree sidebar).
       M.set_opened_buffer(buf)
 
-      -- When focusing the BSI Tree buffer itself, do a full refresh
-      -- (re-scan filesystem + git status/numstat, preserve expansion, then render).
+      -- When focusing the BSI Tree buffer itself: just re-render (cheap) to keep
+      -- highlights in sync. Do *not* do a full refresh() here — that would re-run
+      -- git status + fs scan on every sidebar focus/click, which feels slow.
+      -- User can press R for explicit full resync of git/fs.
       if M.instances[buf] then
         local tree = M.instances[buf]
         if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
-          tree:refresh()
+          tree:render()
         end
       end
 
       local path = vim.api.nvim_buf_get_name(buf)
-      if path == "" then return end
-      for _, tree in pairs(M.instances) do
-        if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
-          tree:find_file(path)
+      -- Only consider real file buffers for opened-file sync (skip tree, help, quickfix, terminals, etc.)
+      if path == "" or vim.bo[buf].buftype ~= "" or vim.bo[buf].filetype == "Tree" then
+        return
+      end
+
+      -- Only sync tree selection (find_file + possible ancestor expand + render)
+      -- when the *opened file actually changed*. This avoids paying the walk+render
+      -- cost on every BufEnter (quickfix, help, terminals, tree itself, etc).
+      if path ~= M._last_synced_file then
+        M._last_synced_file = path
+        for _, tree in pairs(M.instances) do
+          if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
+            tree:find_file(path)
+          end
         end
       end
     end,
@@ -1552,20 +1817,6 @@ function M.setup(opts)
         M.opened_buffer = nil
       end
       for _, tree in pairs(M.instances) do tree:render() end
-    end,
-  })
-
-  -- Live cursor line highlight inside the tree
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
-    group = group,
-    callback = function(args)
-      local buf = args.buf
-      if vim.bo[buf].filetype == "Tree" then
-        local tree = M.instances[buf]
-        if tree and tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
-          tree:render()
-        end
-      end
     end,
   })
 
