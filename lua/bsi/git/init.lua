@@ -94,6 +94,15 @@ function M.get_remote_origin()
     return M.get_remote_url("origin")
 end
 
+--- Returns the origin remote converted to https form (or nil if no origin).
+function M.get_remote_origin_https()
+    local remote = M.get_remote_origin()
+    if not remote or remote == "" then
+        return nil
+    end
+    return M.convert_remote_to_https(remote)
+end
+
 -- Re-export from the dedicated remote submodule for backward compatibility.
 -- New code is encouraged to use git.remote.convert_remote_to_https directly.
 M.convert_remote_to_https = M.remote.convert_remote_to_https
@@ -124,10 +133,41 @@ end
 -- The real classification + blob style logic lives in bsi.git.remote.
 M.get_git_provider = M.remote.get_git_provider
 
--- Convenience re-export of the blob path style helper.
-M.get_blob_path_style = M.remote.get_blob_path_style
+-- Path style helpers and builders (moved here from ide for better ownership).
+-- High level "current" helpers like build_current_commit_url are provided on the
+-- main git module so callers (e.g. ide) do not need to reach into .remote.
+M.get_blob_path_style   = M.remote.get_blob_path_style
+M.get_commit_path_style = M.remote.get_commit_path_style
+M.get_pipelines_path_style = M.remote.get_pipelines_path_style
+
+M.build_commit_url   = M.remote.build_commit_url
+M.build_blob_url     = M.remote.build_blob_url
+M.build_pipelines_url = M.remote.build_pipelines_url
+
+--- High-level helper: build the web URL for the currently checked out commit.
+--- This is the recommended way instead of reaching into git.remote directly.
+function M.build_current_commit_url()
+    local hash = M.get_current_commit_hash()
+    if not hash or hash == "" then
+        return nil
+    end
+    local remote = M.get_remote_origin()
+    if not remote or remote == "" then
+        return nil
+    end
+    return M.remote.build_commit_url(remote, hash)
+end
+
+-- Convenience alias
+M.get_current_commit_url = M.build_current_commit_url
+
 M.parse_remote = M.remote.parse
 M.parse_remote_or_nil = M.remote.parse_or_nil
+
+-- Also available under .remote for people working in the remote submodule namespace
+M.remote.get_origin_https = M.get_remote_origin_https
+M.remote.get_remote_origin_https = M.get_remote_origin_https  -- alias for clarity
+
 
 -- Assuming git module has or needs these helpers:
 -- git.get_blame_commit_hash(file_path, line_number)

@@ -10,12 +10,15 @@
 --   - Parsing a remote URL into structured components {host, user, repo}.
 --   - Classifying which forge / hosting service a remote belongs to
 --     (GitHub, GitLab, self-hosted, etc.).
---   - Deciding presentation details that depend on the forge type
---     (e.g. the URL path segment used for file blobs: /blob/ vs /-/blob/).
+--   - Deciding presentation details + building common forge URLs
+--     (blob at ref, commit, pipelines, etc.).
 --
 -- It is intentionally *string-oriented*. It does not run `git` commands
 -- (those live in the parent `bsi.git` module). It receives remote URLs
 -- that have usually been obtained via `git remote get-url ...`.
+--
+-- Builders that used to live in bsi.utils.ide (now bsi.ide) (build_commit_url, build_blob_url,
+-- build_pipelines_url, and the *path_style getters) have been moved here.
 --
 -- Why this lives under `bsi.git`:
 --   - Remotes are a core git concept.
@@ -26,7 +29,7 @@
 --
 -- Consumers:
 --   - bsi.webify (for building "open this file on GitHub/GitLab" links)
---   - bsi.utils.ide (for opening repo, commit, blame, pipelines, MRs)
+--   - bsi.ide (for opening repo, commit, blame, pipelines, MRs)
 --   - fastgit and others that need project names or forge identity.
 --
 -- ============================================================================
@@ -205,6 +208,10 @@ end
 --- GitLab family:  /-/blob/
 --- Unknown:        /blob/  (reasonable default for many self-hosted forges)
 ---
+--- These builders (and the path style helpers) were previously duplicated in
+--- bsi.ide. They belong here because they are about remote/forge URL
+--- construction, which is a git remote concern.
+---
 --- @param remote_or_url_or_host string|table|nil
 --- @return string  e.g. "/blob/" or "/-/blob/"
 function M.get_blob_path_style(remote_or_url_or_host)
@@ -218,6 +225,84 @@ function M.get_blob_path_style(remote_or_url_or_host)
     -- Callers that care can pass a more specific value or override.
     return "/blob/"
   end
+end
+
+--- Returns the URL path segment used for commits.
+--- GitHub family:  /commit/
+--- GitLab family:  /-/commit/
+---
+--- @param remote_or_url_or_host string|table|nil
+--- @return string
+function M.get_commit_path_style(remote_or_url_or_host)
+  local forge = M.classify(remote_or_url_or_host)
+  if forge == "github" then
+    return "/commit/"
+  elseif forge == "gitlab" then
+    return "/-/commit/"
+  else
+    return "/commit/"
+  end
+end
+
+--- Returns the URL path segment used for pipelines / CI.
+--- GitHub family:  /actions
+--- GitLab family:  /-/pipelines
+---
+--- @param remote_or_url_or_host string|table|nil
+--- @return string
+function M.get_pipelines_path_style(remote_or_url_or_host)
+  local forge = M.classify(remote_or_url_or_host)
+  if forge == "github" then
+    return "/actions"
+  elseif forge == "gitlab" then
+    return "/-/pipelines"
+  else
+    return "/-/pipelines"
+  end
+end
+
+--- Build a full URL to a commit on the forge.
+---
+--- @param remote string|nil   Raw or https remote (e.g. from git.get_remote_origin())
+--- @param hash string         Commit hash or ref
+--- @return string|nil
+function M.build_commit_url(remote, hash)
+  if not remote or not hash then return nil end
+  local https = M.convert_remote_to_https(remote)
+  local seg = M.get_commit_path_style(https)
+  return https .. seg .. hash
+end
+
+--- Build a full URL to a file (blob) at a specific ref (branch or commit hash).
+--- This is the convenience version that takes a remote string.
+---
+--- For the more structured version (host/user/repo/...), see bsi.webify.url.build_blob_url.
+---
+--- @param remote string|nil
+--- @param ref string                Branch or commit hash
+--- @param relative_path string
+--- @param line number|nil
+--- @return string|nil
+function M.build_blob_url(remote, ref, relative_path, line)
+  if not remote or not ref or not relative_path then return nil end
+  local https = M.convert_remote_to_https(remote)
+  local seg = M.get_blob_path_style(https)
+  local url = https .. seg .. ref .. "/" .. relative_path:gsub("^/+", "")
+  if line and line > 0 then
+    url = url .. "#L" .. line
+  end
+  return url
+end
+
+--- Build a URL to the pipelines / CI page.
+---
+--- @param remote string|nil
+--- @return string|nil
+function M.build_pipelines_url(remote)
+  if not remote then return nil end
+  local https = M.convert_remote_to_https(remote)
+  local seg = M.get_pipelines_path_style(https)
+  return https .. seg
 end
 
 return M

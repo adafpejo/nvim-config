@@ -108,16 +108,10 @@ end
 --- @param with_line boolean
 --- @return string|nil
 local function get_current_file_web_url(with_line)
-  -- 1. Obtain the remote and convert it to https form (git layer responsibility).
-  local remote = git.get_remote_origin()
-  if not remote or remote == "" then
-    vim.notify("webify: no remote origin configured for this repository", vim.log.levels.WARN)
-    return nil
-  end
-
-  local https_remote = git.convert_remote_to_https(remote)
+  -- 1. Obtain the remote in https form (git layer responsibility).
+  local https_remote = git.get_remote_origin_https()
   if not https_remote or https_remote == "" then
-    vim.notify("webify: failed to convert remote to https form", vim.log.levels.WARN)
+    vim.notify("webify: no remote origin configured for this repository", vim.log.levels.WARN)
     return nil
   end
 

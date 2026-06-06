@@ -1,6 +1,6 @@
 local nvim    = require("bsi.utils.nvim")
 local async   = require("bsi.utils.async")
-local ide     = require("bsi.utils.ide")
+local ide     = require("bsi.ide")
 local llama   = require('bsi.ai.llama')
 local utils   = require('bsi.utils')
 local logger  = require('bsi.logger')

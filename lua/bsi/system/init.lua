@@ -179,7 +179,7 @@ local M = {}
 --- See also
 --- --------
 --- - bsi.ui.tree: uses this for the "o" (open with system) action.
---- - bsi.utils.ide: many git-web helpers delegate to this after constructing URLs.
+--- - bsi.ide: many git-web helpers delegate to this after constructing URLs.
 --- - lua/plugin/nvim-tree.lua: extra "o" / "of" mappings also use it.
 function M.open_url(url)
   local cmd
