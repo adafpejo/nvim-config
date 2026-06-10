@@ -1,4 +1,3 @@
-local refactoring = require("bsi.refactoring")
 local nvim        = require("bsi.utils.nvim")
 local ai          = require("bsi.ai")
 local ide         = require("bsi.ide")
@@ -26,8 +25,8 @@ vim.keymap.set('v', 'p', '"_dp', {
     noremap = true,
 })
 
---- Navigate to the next/prev file using the BSI Tree (if one is currently open
---- as part of a UI layout). Does nothing if no BSI tree window exists.
+--- Navigate to the next/prev file using the BSI Tree (if one is currently open).
+--- Does nothing if no BSI tree window exists.
 ---@param dir "down"|"up"
 local function navigate_file(dir)
   local instances = bsi_tree.instances or {}
@@ -62,8 +61,6 @@ vim.keymap.set({ "v" }, "<", "<gv", { noremap = true, desc = "Remap to save sele
 vim.keymap.set({ "v" }, ">", ">gv", { noremap = true, desc = "Remap to save selected" })
 
 vim.keymap.set('n', '<leader>fh', '<cmd>Telescope help_tags<cr>', { noremap = true, silent = true })
-
-vim.keymap.set({ "v" }, "<leader>f", refactoring.format_markdown_150, { noremap = true });
 
 -- Remap K and J
 vim.keymap.set({ "n", "v" }, "<leader>k", "K", { noremap = true, desc = "Keyword" })

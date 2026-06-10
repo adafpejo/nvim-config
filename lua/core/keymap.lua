@@ -4,8 +4,6 @@ local git     = require("bsi.git")
 local keymap = vim.keymap
 local gitsigns = require('gitsigns')
 
-require("bsi.ui").setup_keymaps()
-
 -- keymap
 vim.keymap.set("n", "<leader>lg", "<cmd>LazyGit<cr>", { desc = "LazyGit", noremap = true })
 vim.keymap.set("n", "<leader>z", "<cmd>Zen<CR>", { desc = "Zen mod", noremap = true })

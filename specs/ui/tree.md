@@ -67,9 +67,11 @@ These are synthesized by the Provider during aggregation:
 ## Core Features
 
 ### 1. Filesystem Scanning
-- Recursive `vim.loop.fs_scandir` + `fs_lstat`
-- Hard-coded ignore list: `node_modules`, `.git`, `vendor`, `dist`, `build`, `target`
+- Recursive `vim.loop.fs_scandir` + `fs_lstat` (with bounded initial depth for interactive trees and on-demand expansion for subdirs)
+- Hard-coded name-based ignore list (fast path, no git): `node_modules`, `.git`, `vendor`, `dist`, `build`, `target`
+- Gitignore (`.gitignore` rules) for gray rendering (`BSITreeGitIgnored`) and skip decisions when `show_ignored=false` is determined via a **single** `git status --porcelain=v1 -z --ignored=matching` snapshot per root (plus parent propagation and Lua prefix checks). Per-path `git check-ignore` is a legacy fallback only. This replaced the O(N) process spawns that caused the post-gray-rendering perf collapse on large ignored trees.
 - Deleted files that still appear in `git status --porcelain` are synthesized into the tree even if they no longer exist on disk
+- Initial open of the main tree only materializes a shallow view (root direct children + ancestors of the current editing buffer). Everything else is populated lazily when toggled or targeted by find/navigate.
 
 ### 2. Git Status (porcelain)
 - Full `git status --porcelain` parsing (staged + unstaged)
@@ -110,10 +112,13 @@ These are synthesized by the Provider during aggregation:
 - `get_visible_nodes()` performs a depth-first walk respecting the `expanded` flag (with simple caching across renders when no expansion/root mutation occurred)
 - `render()` flattens to visible list (no deepcopy) and asks Renderer to render; display depth is computed as node.depth-1 inside the renderer (root is filtered before visible list)
 
-### 8. Lazy Loading
-- When you toggle a directory whose children have never been scanned (`children == {}`), a targeted `Provider:scan` is performed using the cached `_git_changes` / `_git_numstats` from the parent Tree instance
-- Works in both normal mode and `git_only` mode
+### 8. Lazy Loading & Bounded Initial Scans (Performance)
+- Initial tree construction for interactive views (not `git_only`) uses a bounded scan (`max_depth` at root) so the whole FS and huge subtrees are not walked on `<leader>ee` / u1 etc. Only direct children of the root are populated at open time.
+- The single tracked "opened buffer" (the file the user is actively editing) seeds the view: `find_file` (called from BufEnter sync guard + explicitly after open) expands only the ancestor chain to the current file using targeted on-demand `Provider:scan` for those specific directories.
+- When you toggle a directory whose children have never been scanned (`children == {}`, `_unpopulated`, or `_shallow_ignored`), a targeted `Provider:scan` is performed using the cached `_git_changes` / `_git_numstats` from the parent Tree instance.
+- Works in both normal mode and `git_only` mode.
 - Git-ignored directories (shown when `show_ignored`) use shallow population: only direct children are listed on open; their subdirectories stay as collapsed stubs. This keeps render/scan cost low for massive ignored trees (node_modules, vendor, dist, etc.). Subdirs are populated on-demand when the user explicitly toggles them. No blanket "expand all" under ignored dirs.
+- Gitignore decisions are driven by a **one-shot snapshot** (`git status --porcelain=v1 -z --ignored=matching`) taken once per Tree root/refresh. The old per-path `git check-ignore` is only a fallback. Combined with `under_ignored` propagation and exact/prefix Lua checks, the cost of "is this gray/should we skip?" is now ~1 process + fast table lookups instead of one process per file. This is the main fix for the post-gray-rendering perf regression on large repos. (Modeled on nvim-tree's GitRunner + parent_ignored + disable_for_dirs patterns.)
 
 ### 9. Git-Only Mode (`git_only = true`)
 - Used by layout "2" (`<leader>u2`)
@@ -245,7 +250,7 @@ It also uses `"Special"` (purple) for directories that contain any git changes (
 
 ## Limitations & Known Behaviors
 
-- Git operations (`status`, `diff --numstat`) are currently **synchronous** (`io.popen` + `vim.fn.system`). Large repositories can cause noticeable lag on first open or `R`.
+- Git operations (`status`, `diff --numstat`, the ignore snapshot) are currently **synchronous** (`io.popen`). Large repositories can still cause some lag on first open or `R` (but far less than before: one or two processes for the whole project instead of one per file for the ignore checks). The snapshot + bounded scan + lazy subdir population keep perceived cost low even when huge ignored trees are present.
 - The fixed status column (`status_col = 34`) is a heuristic; very long filenames + git detail can push the single-char prefix far to the right.
 - `print()` is still used for yank feedback (should be `vim.notify`).
 - No horizontal scrolling help; very deep trees or extremely long names can become hard to read.

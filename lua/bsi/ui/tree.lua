@@ -31,6 +31,7 @@ M.config = {
 
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 local system = require("bsi.system")
+local Cmd = require("bsi.cmd")
 
 ---@class bsi.Node
 ---@field id string
@@ -429,6 +430,54 @@ function Provider:_get_git_changes(root)
   return changes
 end
 
+--- Collects the set of git-ignored paths (and directory prefixes) for a root in one shot.
+--- Uses `git status --porcelain=v1 -z --ignored=matching` so we get "!!" entries without
+--- N separate `git check-ignore` calls. Combined with parent/under_ignored propagation
+--- and the existing shallow logic, this makes the per-node gitignore decision O(1) Lua
+--- for the vast majority of entries (huge wins on node_modules, vendor, etc.).
+---@param root string
+---@return table|nil  Map of absolute path -> true for directly reported ignored paths.
+function Provider:_get_git_ignored_snapshot(root)
+  local req_root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+  req_root = vim.fn.resolve(req_root):gsub("/$", "")
+
+  local git_root_cmd = "git -C " .. vim.fn.shellescape(req_root) .. " rev-parse --show-toplevel 2>/dev/null"
+  local handle_root = io.popen(git_root_cmd)
+  if not handle_root then return nil end
+  local git_root = handle_root:read("*l")
+  handle_root:close()
+  if not git_root or git_root == "" then return nil end
+  git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
+  git_root = vim.fn.resolve(git_root):gsub("/$", "")
+
+  -- Include ignored entries (status "!!"). -z for robustness; we normalize later.
+  local cmd = "git -C " .. vim.fn.shellescape(git_root) .. " status --porcelain=v1 -z --ignored=matching"
+  local handle = io.popen(cmd)
+  if not handle then return nil end
+  local result = handle:read("*a")
+  handle:close()
+
+  if result == "" then return nil end
+
+  local ignored = {}
+  -- Split on NUL (porcelain -z). Lines are "XY path\0" (or "XY orig\0 -> \0new" for renames, but ignored are simple).
+  for entry in vim.gsplit(result, "\0", { plain = true, trimempty = true }) do
+    if entry == "" then goto continue end
+    local status = entry:sub(1, 2)
+    local path = entry:sub(4)
+    if path:match('^"') then path = path:match('^"(.*)"$') or path end
+    if status == "!!" and path and path ~= "" then
+      local full = (git_root .. "/" .. path):gsub("/+$", "")
+      ignored[full] = true
+      -- Also mark the parent chain lightly so prefix checks are cheap if needed;
+      -- but we primarily rely on exact + the under_ignored propagation in scan.
+    end
+    ::continue::
+  end
+
+  return next(ignored) and ignored or nil
+end
+
 --- Fetches git numstat (+added/-deleted lines) for files in the repo.
 --- Runs both `git diff --numstat` (unstaged) and `git diff --cached --numstat` (staged) and merges results.
 ---@param root string The directory to check
@@ -528,6 +577,9 @@ function Provider:_should_skip(fullpath, name, opts)
 end
 
 --- Checks if a path is ignored according to .gitignore (cached).
+--- Prefers a bulk snapshot (from `git status --ignored=matching`) populated at scan start.
+--- Falls back to legacy per-path `git check-ignore` only for cache misses (should be rare
+--- after the snapshot + under_ignored propagation + DEFAULT_IGNORE name filters).
 function Provider:_is_git_ignored(fullpath)
   self._ignored_cache = self._ignored_cache or {}
 
@@ -535,7 +587,25 @@ function Provider:_is_git_ignored(fullpath)
     return self._ignored_cache[fullpath]
   end
 
-  -- Determine git root (cached)
+  -- Fast path from one-shot snapshot (populated in Tree.new/refresh before scan).
+  if self._ignored_snapshot and self._ignored_snapshot[fullpath] then
+    self._ignored_cache[fullpath] = true
+    return true
+  end
+
+  -- Also support a lightweight "under known ignored dir" prefix check if we have
+  -- a list of top-level ignored directory roots from the snapshot. This catches
+  -- children that git status may not have emitted individually.
+  if self._ignored_dir_prefixes then
+    for _, prefix in ipairs(self._ignored_dir_prefixes) do
+      if fullpath == prefix or vim.startswith(fullpath, prefix .. "/") then
+        self._ignored_cache[fullpath] = true
+        return true
+      end
+    end
+  end
+
+  -- Determine git root (cached) for legacy fallback
   if self._git_root == nil then
     local dir = vim.fn.isdirectory(fullpath) == 1 and fullpath or vim.fn.fnamemodify(fullpath, ":h")
     local out = vim.fn.systemlist({ "git", "-C", dir, "rev-parse", "--show-toplevel" })
@@ -635,6 +705,13 @@ function Provider:scan(path, depth, opts)
     if is_dir then
       local child_ignored = this_ignored or self:_is_git_ignored(fullpath)
       local force_full = opts and opts._force_full_ignored_scan or false
+
+      -- Bounded initial scan support: if caller set max_depth, do not descend beyond it
+      -- for non-forced, non-expand_all cases. The dir will be a stub; toggle/find_file
+      -- will populate on demand (existing lazy paths).
+      local max_d = opts and opts.max_depth
+      local at_max_depth = max_d and (depth + 1 > max_d)
+
       if not force_full and this_ignored and not opts.expand_all then
         -- Performance: for git-ignored directories, scan/render only one level deep.
         -- (Direct children of ignored dir are included; their sub-children are stubbed.)
@@ -653,6 +730,22 @@ function Provider:scan(path, depth, opts)
           git_numstat = numstat,
           git_ignored = child_ignored,
           _shallow_ignored = true,
+        }
+      elseif at_max_depth and not force_full and not opts.expand_all then
+        -- Bounded: represent as unpopulated (or shallow) stub dir. Will be filled
+        -- when user opens it or find_file / navigate targets inside it.
+        child = {
+          id = fullpath,
+          name = name,
+          path = fullpath,
+          type = "directory",
+          depth = depth + 1,
+          expanded = false,
+          children = {},
+          git_status = g_status ~= "dir" and g_status or nil,
+          git_numstat = numstat,
+          git_ignored = child_ignored,
+          _unpopulated = true,
         }
       else
         local sub_opts = vim.tbl_extend("force", opts or {}, { _under_ignored = this_ignored or child_ignored })
@@ -852,29 +945,403 @@ function Tree.new(opts)
   else
     self.show_ignored = M.config.show_ignored
   end
-  local scan_opts = {
-    expand_all = opts.expand_all,
-    git_only = false,  -- always build full tree structure for fast mode switching with 'g'
-    show_ignored = self.show_ignored,
-  }
-  scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
-  scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
-  self._git_changes = scan_opts.git_changes
-  self._git_numstats = scan_opts.git_numstats
-  local root_node = self.provider:scan(self.root_path, 0, scan_opts)
-  self.state = { root = root_node or { id = self.root_path, name = vim.fn.fnamemodify(self.root_path, ":t"), path = self.root_path, type = "root", depth = 0, expanded = true, children = {} } }
 
-  -- For git-only views (used by <leader>ge and layout u2), auto-expand directories that
-  -- contain changes so the user immediately sees the modified / untracked files.
+  -- IMMEDIATE PATH: set up a minimal placeholder so open() + render() can happen
+  -- with zero blocking git/fs work. The real tree (with git data + children) will
+  -- be built asynchronously and rendered when ready.
+  self._git_changes = nil
+  self._git_numstats = nil
+  self.provider._ignored_snapshot = nil
+  self.provider._ignored_dir_prefixes = nil
+  self._git_fetch_pending = 0
+  self._git_fetch_started = false
+  self._initial_scan_opts = {
+    expand_all = opts.expand_all,
+    git_only = false,
+    show_ignored = self.show_ignored,
+    max_depth = (not opts.git_only) and 1 or nil,
+  }
+
+  -- Placeholder root so the UI can appear instantly (empty children until data arrives)
+  self.state = {
+    root = {
+      id = self.root_path,
+      name = vim.fn.fnamemodify(self.root_path, ":t"),
+      path = self.root_path,
+      type = "root",
+      depth = 0,
+      expanded = true,
+      children = {},
+    },
+  }
+  self._visible_dirty = true
+
+  -- Kick off async git data collection (changes + numstats + ignored snapshot) in parallel.
+  -- When all are ready we perform the real (bounded) scan and render if the tree is open.
+  self:_start_async_git_fetch()
+
+  -- For git_only views we still want the "auto expand changed" behavior once data is ready
+  -- (handled inside _complete_initial_scan).
   if opts.git_only then
     self.opts.git_only = true
-    self:_expand_changed_dirs()
   end
 
   self.bufnr = opts.bufnr
   self.winid = opts.winid
-  self._visible_dirty = true
   return self
+end
+
+--- Kick off the three async git data fetches (changes, numstats, ignored snapshot) in parallel
+--- using bsi.cmd (vim.system). When all complete we build the real tree and render.
+function Tree:_start_async_git_fetch()
+  if self._git_fetch_started then return end
+  self._git_fetch_started = true
+  self._git_fetch_pending = 3
+
+  local function on_done_one()
+    self._git_fetch_pending = self._git_fetch_pending - 1
+    if self._git_fetch_pending <= 0 then
+      self:_complete_initial_scan()
+    end
+  end
+
+  self:_fetch_git_changes_async(on_done_one)
+  self:_fetch_git_numstats_async(on_done_one)
+  self:_fetch_git_ignored_snapshot_async(on_done_one)
+end
+
+--- Async fetch for porcelain git status (including untracked dir expansion).
+--- Mirrors the old _get_git_changes logic but non-blocking.
+function Tree:_fetch_git_changes_async(done)
+  local req_root = self.root_path
+
+  -- First rev-parse to get the true toplevel (needed for correct status and filtering)
+  Cmd.new({ "git", "-C", req_root, "rev-parse", "--show-toplevel" }, {
+    on_success = function(c)
+      local git_root = vim.trim(c:job().stdout or "")
+      if git_root == "" then
+        self._git_changes = nil
+        done()
+        return
+      end
+      git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
+      git_root = vim.fn.resolve(git_root):gsub("/$", "")
+
+      -- Now the real status (we request ignored here too so the same data can feed the snapshot if desired,
+      -- but we keep a dedicated ignored snapshot for clarity and to include untracked-ignored reliably).
+      Cmd.new({ "git", "-C", git_root, "status", "--porcelain" }, {
+        on_success = function(c2)
+          local result = c2:job().stdout or ""
+          if result == "" then
+            self._git_changes = nil
+            done()
+            return
+          end
+
+          local changes = {}
+          changes[git_root] = { status = "dir" }
+
+          local function under_req(p)
+            return p == req_root or p:sub(1, #req_root + 1) == req_root .. "/"
+          end
+
+          for line in result:gmatch("[^\r\n]+") do
+            local status = line:sub(1, 2)
+            local path = line:sub(4)
+            if path:match('^"') then path = path:match('^"(.*)"$') end
+            if path:match(" %-> ") then path = vim.split(path, " -> ")[2] end
+
+            local fullpath = (git_root .. "/" .. path):gsub("/$", "")
+
+            if status == "??" and vim.fn.isdirectory(fullpath) == 1 then
+              local function mark_untracked(p)
+                if under_req(p) then
+                  changes[p] = { status = "??" }
+                end
+                local h = vim.loop.fs_scandir(p)
+                if h then
+                  while true do
+                    local name, typ = vim.loop.fs_scandir_next(h)
+                    if not name then break end
+                    local fp = p .. "/" .. name
+                    if typ == "directory" then
+                      mark_untracked(fp)
+                    else
+                      if under_req(fp) then
+                        changes[fp] = { status = "??" }
+                      end
+                    end
+                  end
+                end
+              end
+              mark_untracked(fullpath)
+            else
+              if under_req(fullpath) then
+                changes[fullpath] = { status = status }
+                local current = fullpath
+                while #current > #git_root do
+                  current = vim.fn.fnamemodify(current, ":h")
+                  if not changes[current] then
+                    changes[current] = { status = "dir" }
+                  elseif changes[current].status ~= "dir" then
+                    break
+                  end
+                  if current == git_root then break end
+                end
+              end
+            end
+          end
+
+          self._git_changes = changes
+          done()
+        end,
+        on_error = function()
+          self._git_changes = nil
+          done()
+        end,
+      })
+    end,
+    on_error = function()
+      self._git_changes = nil
+      done()
+    end,
+  })
+end
+
+--- Async fetch for git numstat (+/- deltas).
+function Tree:_fetch_git_numstats_async(done)
+  local root = self.root_path
+
+  Cmd.new({ "git", "-C", root, "rev-parse", "--show-toplevel" }, {
+    on_success = function(c)
+      local git_root = vim.trim(c:job().stdout or "")
+      if git_root == "" then
+        self._git_numstats = nil
+        done()
+        return
+      end
+      git_root = vim.trim(git_root)
+
+      local stats = {}
+
+      local function parse_and_merge(output)
+        for line in output:gmatch("[^\r\n]+") do
+          local added_str, deleted_str, path = line:match("^(%S+)%s+(%S+)%s+(.+)$")
+          if not added_str or not deleted_str or not path then goto continue end
+
+          if path:match(" => ") then
+            path = vim.split(path, " => ")[2] or path
+          end
+          if path:match('^"') then
+            path = path:match('^"(.*)"$') or path
+          end
+
+          local added = (added_str == "-") and 0 or (tonumber(added_str) or 0)
+          local deleted = (deleted_str == "-") and 0 or (tonumber(deleted_str) or 0)
+
+          local fullpath = (git_root .. "/" .. path):gsub("/$", "")
+
+          if stats[fullpath] then
+            stats[fullpath].added = stats[fullpath].added + added
+            stats[fullpath].deleted = stats[fullpath].deleted + deleted
+          else
+            stats[fullpath] = { added = added, deleted = deleted }
+          end
+          ::continue::
+        end
+      end
+
+      -- We launch the two diff commands in parallel and merge when both done.
+      local pending = 2
+      local function maybe_done()
+        pending = pending - 1
+        if pending == 0 then
+          self._git_numstats = next(stats) and stats or nil
+          done()
+        end
+      end
+
+      Cmd.new({ "git", "-C", git_root, "diff", "--numstat" }, {
+        on_success = function(c1)
+          parse_and_merge(c1:job().stdout or "")
+          maybe_done()
+        end,
+        on_error = function() maybe_done() end,
+      })
+
+      Cmd.new({ "git", "-C", git_root, "diff", "--cached", "--numstat" }, {
+        on_success = function(c2)
+          parse_and_merge(c2:job().stdout or "")
+          maybe_done()
+        end,
+        on_error = function() maybe_done() end,
+      })
+    end,
+    on_error = function()
+      self._git_numstats = nil
+      done()
+    end,
+  })
+end
+
+--- Async fetch for the gitignored snapshot (the key perf piece).
+--- Uses the same --ignored=matching status so we get "!!" entries in one shot.
+function Tree:_fetch_git_ignored_snapshot_async(done)
+  local req_root = self.root_path
+
+  Cmd.new({ "git", "-C", req_root, "rev-parse", "--show-toplevel" }, {
+    on_success = function(c)
+      local git_root = vim.trim(c:job().stdout or "")
+      if git_root == "" then
+        self.provider._ignored_snapshot = {}
+        self.provider._ignored_dir_prefixes = nil
+        done()
+        return
+      end
+      git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
+      git_root = vim.fn.resolve(git_root):gsub("/$", "")
+
+      Cmd.new({ "git", "-C", git_root, "status", "--porcelain=v1", "-z", "--ignored=matching" }, {
+        on_success = function(c2)
+          local result = c2:job().stdout or ""
+          local ignored = {}
+
+          for entry in vim.gsplit(result, "\0", { plain = true, trimempty = true }) do
+            if entry == "" then goto cont end
+            local status = entry:sub(1, 2)
+            local path = entry:sub(4)
+            if path:match('^"') then path = path:match('^"(.*)"$') or path end
+            if status == "!!" and path and path ~= "" then
+              local full = (git_root .. "/" .. path):gsub("/+$", "")
+              ignored[full] = true
+            end
+            ::cont::
+          end
+
+          self.provider._ignored_snapshot = ignored
+          self.provider._ignored_dir_prefixes = nil
+          if next(ignored) then
+            local prefixes = {}
+            for p in pairs(ignored) do
+              if vim.fn.isdirectory(p) == 1 then
+                table.insert(prefixes, p)
+              end
+            end
+            self.provider._ignored_dir_prefixes = prefixes
+          end
+          done()
+        end,
+        on_error = function()
+          self.provider._ignored_snapshot = {}
+          self.provider._ignored_dir_prefixes = nil
+          done()
+        end,
+      })
+    end,
+    on_error = function()
+      self.provider._ignored_snapshot = {}
+      self.provider._ignored_dir_prefixes = nil
+      done()
+    end,
+  })
+end
+
+--- Called when all async git data has arrived (from either initial construction or a refresh).
+--- Builds/scans the tree with the new data. If a refresh restore was pending, it performs
+--- the expansion preservation logic. Otherwise it does the normal initial post-scan work.
+function Tree:_complete_initial_scan()
+  local is_refresh = self._pending_refresh_restore ~= nil
+  local restore_info = self._pending_refresh_restore
+  self._pending_refresh_restore = nil
+
+  local scan_opts = vim.tbl_extend("force", self._initial_scan_opts or {
+    expand_all = false,
+    git_only = false,
+    show_ignored = self.show_ignored,
+    max_depth = (not (self.opts and self.opts.git_only)) and 1 or nil,
+  }, {
+    git_changes = self._git_changes,
+    git_numstats = self._git_numstats,
+    show_ignored = self.show_ignored,
+  })
+
+  local new_root = self.provider:scan(self.root_path, 0, scan_opts)
+  new_root = new_root or {
+    id = self.root_path,
+    name = vim.fn.fnamemodify(self.root_path, ":t"),
+    path = self.root_path,
+    type = "root",
+    depth = 0,
+    expanded = true,
+    children = {},
+  }
+
+  if is_refresh and restore_info then
+    -- Restore expansion state (same logic as the old sync refresh)
+    local function restore(node)
+      if restore_info.expanded[node.id] or restore_info.expand_all then
+        node.expanded = true
+        if node.children then
+          for _, child in ipairs(node.children) do restore(child) end
+        end
+      end
+    end
+    restore(new_root)
+
+    if next(restore_info.full_ignored_paths or {}) then
+      local function restore_full_ignored(node)
+        if restore_info.full_ignored_paths[node.id] and node.git_ignored then
+          local so = {
+            git_changes = self._git_changes,
+            git_numstats = self._git_numstats,
+            show_ignored = self.show_ignored,
+            _force_full_ignored_scan = true,
+          }
+          local sc = self.provider:scan(node.path, node.depth, so)
+          if sc and sc.children then
+            node.children = sc.children
+          end
+          node._shallow_ignored = false
+          node._unpopulated = false
+        end
+        if node.children then
+          for _, child in ipairs(node.children) do restore_full_ignored(child) end
+        end
+      end
+      restore_full_ignored(new_root)
+    end
+
+    self.state.root = new_root
+    self._visible_dirty = true
+
+    if self.opts and self.opts.git_only then
+      self:_expand_changed_dirs()
+    end
+
+    if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+      self:render()
+    end
+    return
+  end
+
+  -- Normal initial completion path
+  self.state = { root = new_root }
+  self._visible_dirty = true
+
+  if self.opts and self.opts.git_only then
+    self:_expand_changed_dirs()
+  end
+
+  if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+    self:render()
+    self:_update_winbar()
+  end
+
+  -- Seed from the currently opened file (the "only the file the user cares about" behavior)
+  local opened_path = M.get_opened_file()
+  if opened_path ~= "" then
+    self:find_file(opened_path)
+  end
 end
 
 --- Returns the root path of the tree formatted for display (home-relative)
@@ -959,7 +1426,28 @@ function Tree:open()
 
   self:render()
 
-  -- Set winbar (will be "Git: ..." if in git mode)
+  -- If we're still waiting on the async git data, give a subtle hint in the winbar.
+  -- The real content (and the proper title) will appear when _complete_initial_scan runs.
+  if self._git_fetch_pending and self._git_fetch_pending > 0 and self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    local base = self:get_root_path()
+    if self.opts and self.opts.git_only then base = "Git: " .. base end
+    local function render_title(t)
+      vim.api.nvim_set_hl(0, "BSITreeTitle", { fg = "#3EFFDC", bold = true })
+      return "%#BSITreeTitle# " .. t
+    end
+    vim.wo[self.winid].winbar = render_title(base .. " (loading...)")
+  end
+
+  -- Best-effort: ensure the single tracked opened file (the one the user is editing)
+  -- has its ancestor chain populated and selected. With max_depth-bounded initial
+  -- scans this is what "seeds" the useful part of the tree without walking everything.
+  -- Safe to call even if the file is not under this root (find_file early-returns).
+  local opened = M.get_opened_file()
+  if opened ~= "" then
+    self:find_file(opened)
+  end
+
+  -- Set winbar (will be "Git: ..." if in git mode). The _complete path will also call this.
   self:_update_winbar()
 
   local map = function(lhs, rhs, desc)
@@ -996,77 +1484,56 @@ end
 
 --- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
 function Tree:refresh()
-  -- Clear gitignore caches on refresh
-  if self.provider then
-    self.provider._ignored_cache = {}
-    self.provider._git_root = nil
-  end
-
+  -- Capture expansion state before we blow away the tree (same as before)
   local expanded = {}
   local full_ignored_paths = {}
   local function collect(node)
     if node.expanded then expanded[node.id] = true end
-    -- Track gitignored nodes that have had their (direct) children populated so we
-    -- can re-force a one-level refresh of them on R to pick up new top-level entries.
-    -- We no longer store/restore deep expansion inside them.
     if node.git_ignored and not node._shallow_ignored then
       full_ignored_paths[node.id] = true
     end
     if node.children then for _, child in ipairs(node.children) do collect(child) end end
   end
   collect(self.state.root)
-  local scan_opts = {
-    expand_all = self.opts.expand_all,
-    git_only = false,  -- always full structure
-    show_ignored = self.show_ignored,
+
+  -- Store restore info for when async data arrives
+  self._pending_refresh_restore = {
+    expanded = expanded,
+    full_ignored_paths = full_ignored_paths,
+    expand_all = self.opts and self.opts.expand_all,
   }
-  scan_opts.git_changes = self.provider:_get_git_changes(self.root_path)
-  scan_opts.git_numstats = self.provider:_get_git_numstats(self.root_path)
-  self._git_changes = scan_opts.git_changes
-  self._git_numstats = scan_opts.git_numstats
-  local new_root = self.provider:scan(self.root_path, 0, scan_opts)
-  new_root = new_root or { id = self.root_path, name = vim.fn.fnamemodify(self.root_path, ":t"), path = self.root_path, type = "root", depth = 0, expanded = true, children = {} }
-  local function restore(node)
-    if expanded[node.id] or scan_opts.expand_all then
-      node.expanded = true
-      if node.children then for _, child in ipairs(node.children) do restore(child) end end
-    end
-  end
-  restore(new_root)
 
-  -- Re-force full population for ignored subtrees that were fully loaded before refresh
-  if next(full_ignored_paths) then
-    local function restore_full_ignored(node)
-      if full_ignored_paths[node.id] and node.git_ignored then
-        local so = {
-          git_changes = self._git_changes,
-          git_numstats = self._git_numstats,
-          show_ignored = self.show_ignored,
-          _force_full_ignored_scan = true,
-        }
-        local sc = self.provider:scan(node.path, node.depth, so)
-        if sc and sc.children then
-          node.children = sc.children
-        end
-        node._shallow_ignored = false
-        -- Do not blanket-expand ignored subtrees on refresh. The normal restore()
-        -- pass (using the collected `expanded` id map) will re-open any directories
-        -- the user had individually expanded. Subdirs under ignored remain minimal
-        -- to avoid expensive re-renders of huge trees like node_modules.
-      end
-      if node.children then for _, child in ipairs(node.children) do restore_full_ignored(child) end end
-    end
-    restore_full_ignored(new_root)
+  -- Clear caches
+  if self.provider then
+    self.provider._ignored_cache = {}
+    self.provider._git_root = nil
+    self.provider._ignored_snapshot = nil
+    self.provider._ignored_dir_prefixes = nil
   end
+  self._git_changes = nil
+  self._git_numstats = nil
 
-  self.state.root = new_root
+  -- Show a lightweight placeholder while we re-fetch (keeps the window responsive)
+  self.state = {
+    root = {
+      id = self.root_path,
+      name = vim.fn.fnamemodify(self.root_path, ":t"),
+      path = self.root_path,
+      type = "root",
+      depth = 0,
+      expanded = true,
+      children = {},
+    },
+  }
   self._visible_dirty = true
-
-  if self.opts and self.opts.git_only then
-    self:_expand_changed_dirs()
+  if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+    self:render()
   end
 
-  self:render()
+  -- Re-fetch everything asynchronously (re-uses the same three fetchers + completion)
+  self._git_fetch_started = false
+  self._git_fetch_pending = 3
+  self:_start_async_git_fetch()
 end
 
 --- Toggles visibility of hidden (dot) files and git-ignored files/directories
@@ -1077,6 +1544,8 @@ function Tree:toggle_show_ignored()
   if self.provider then
     self.provider._ignored_cache = {}
     self.provider._git_root = nil
+    self.provider._ignored_snapshot = nil
+    self.provider._ignored_dir_prefixes = nil
   end
 
   self:refresh()
@@ -1084,15 +1553,15 @@ end
 
 --- Updates the window title (winbar) to reflect current root and view mode (e.g. git).
 function Tree:_update_winbar()
-  local ok, ctx = pcall(require, "bsi.ui.context")
-  if not ok or not ctx or not ctx.render_title then return end
   if not self.winid or not vim.api.nvim_win_is_valid(self.winid) then return end
 
   local title = self:get_root_path()
   if self.opts and self.opts.git_only then
     title = "Git: " .. title
   end
-  vim.wo[self.winid].winbar = ctx.render_title(title)
+
+  vim.api.nvim_set_hl(0, "BSITreeTitle", { fg = "#3EFFDC", bold = true })
+  vim.wo[self.winid].winbar = "%#BSITreeTitle# " .. title
 end
 
 --- Toggles between full filesystem view and git-changes-only view (same buffer, like normal/insert mode).
@@ -1139,6 +1608,7 @@ function Tree:_expand_changed_dirs()
           node.children = sc.children
         end
         node._shallow_ignored = false
+        node._unpopulated = false
         -- children of this ignored dir are loaded one level; their subdirs remain
         -- shallow (scan propagation prevents deep force under ignored).
       end
@@ -1159,7 +1629,7 @@ function Tree:toggle()
   local node = self.visible_nodes[idx]
   if not node or node.type == "file" then self:_open_file() return end
   if not node.expanded and node.type == "directory" then
-    local needs_load = (node.children and #node.children == 0) or node._shallow_ignored or node.git_ignored
+    local needs_load = (node.children and #node.children == 0) or node._shallow_ignored or node.git_ignored or node._unpopulated
     if needs_load then
       local scan_opts = {
         git_changes = self._git_changes,
@@ -1173,6 +1643,7 @@ function Tree:toggle()
       if scanned and scanned.children then
         node.children = scanned.children
         node._shallow_ignored = false
+        node._unpopulated = false
       end
     end
   end
@@ -1459,7 +1930,7 @@ function Tree:find_file(target_path)
     if node.type == "directory" or node.type == "root" then
       if target:sub(1, #node.path) == node.path then
         if not node.expanded then
-          if node.children and #node.children == 0 then
+          if (node.children and #node.children == 0) or node._unpopulated then
             local scan_opts = {
               git_changes = self._git_changes,
               git_numstats = self._git_numstats,
@@ -1472,6 +1943,7 @@ function Tree:find_file(target_path)
             if scanned and scanned.children then
               node.children = scanned.children
               node._shallow_ignored = false
+              node._unpopulated = false
             end
           end
           node.expanded = true
@@ -1552,7 +2024,7 @@ function Tree:navigate_file(direction)
     local current = (direction == "up") and self:_find_parent_node(node) or node
 
     while current and (current.type == "directory" or current.type == "root") do
-      if not current.children or #current.children == 0 then
+      if not current.children or #current.children == 0 or current._unpopulated then
         -- lazy populate if somehow empty (defensive)
         local scan_opts = {
           git_changes = self._git_changes,
@@ -1566,6 +2038,7 @@ function Tree:navigate_file(direction)
         if scanned and scanned.children then
           current.children = scanned.children
           current._shallow_ignored = false
+          current._unpopulated = false
         end
       end
       local children = current.children or {}

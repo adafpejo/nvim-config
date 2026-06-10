@@ -2,11 +2,9 @@ require("bsi.tail-file")
 require("bsi.postload")
 require("bsi.remap")
 require("bsi.notes")
-require("bsi.refactoring")
 local nt_api      = require("nvim-tree.api")
 
 require("bsi.ui.tree").setup()
-require("bsi.ui").setup_keymaps()
 require('notify').setup({
     timeout = 200
 })
@@ -124,8 +122,6 @@ autocmd({ "FileType" }, {
         vim.opt.tabstop = 2
         vim.opt.shiftwidth = 2
         vim.opt.expandtab = true
-        vim.opt.autointent = true
-        vim.opt.smartintent = true
     end
 })
 
