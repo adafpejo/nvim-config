@@ -26,7 +26,8 @@ M.opened_buffer = nil
 M.config = {
   -- Whether to show hidden (dot) files/directories and git-ignored files by default.
   -- Can be toggled at runtime with the "h" key inside a tree.
-  show_ignored = true,
+  -- Disabled for now (no gray gitignore highlights) — will revisit the implementation later.
+  show_ignored = false,
 }
 
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
@@ -577,9 +578,9 @@ function Provider:_should_skip(fullpath, name, opts)
 end
 
 --- Checks if a path is ignored according to .gitignore (cached).
---- Prefers a bulk snapshot (from `git status --ignored=matching`) populated at scan start.
---- Falls back to legacy per-path `git check-ignore` only for cache misses (should be rare
---- after the snapshot + under_ignored propagation + DEFAULT_IGNORE name filters).
+--- When the gitignore feature is disabled (show_ignored=false by default), this
+--- short-circuits and never does git work — only the cheap DEFAULT_IGNORE name
+--- patterns + dotfiles are filtered.
 function Provider:_is_git_ignored(fullpath)
   self._ignored_cache = self._ignored_cache or {}
 
@@ -587,15 +588,20 @@ function Provider:_is_git_ignored(fullpath)
     return self._ignored_cache[fullpath]
   end
 
-  -- Fast path from one-shot snapshot (populated in Tree.new/refresh before scan).
-  if self._ignored_snapshot and self._ignored_snapshot[fullpath] then
+  -- If no snapshot was collected, it means the gitignore feature is currently
+  -- disabled in config. Treat nothing as git-ignored here (avoid any cost).
+  if not self._ignored_snapshot then
+    self._ignored_cache[fullpath] = false
+    return false
+  end
+
+  -- Fast path from one-shot snapshot.
+  if self._ignored_snapshot[fullpath] then
     self._ignored_cache[fullpath] = true
     return true
   end
 
-  -- Also support a lightweight "under known ignored dir" prefix check if we have
-  -- a list of top-level ignored directory roots from the snapshot. This catches
-  -- children that git status may not have emitted individually.
+  -- Lightweight "under known ignored dir" prefix check.
   if self._ignored_dir_prefixes then
     for _, prefix in ipairs(self._ignored_dir_prefixes) do
       if fullpath == prefix or vim.startswith(fullpath, prefix .. "/") then
@@ -605,7 +611,7 @@ function Provider:_is_git_ignored(fullpath)
     end
   end
 
-  -- Determine git root (cached) for legacy fallback
+  -- Legacy per-path fallback (should rarely be reached now).
   if self._git_root == nil then
     local dir = vim.fn.isdirectory(fullpath) == 1 and fullpath or vim.fn.fnamemodify(fullpath, ":h")
     local out = vim.fn.systemlist({ "git", "-C", dir, "rev-parse", "--show-toplevel" })
@@ -959,7 +965,6 @@ function Tree.new(opts)
     expand_all = opts.expand_all,
     git_only = false,
     show_ignored = self.show_ignored,
-    max_depth = (not opts.git_only) and 1 or nil,
   }
 
   -- Placeholder root so the UI can appear instantly (empty children until data arrives)
@@ -991,12 +996,14 @@ function Tree.new(opts)
   return self
 end
 
---- Kick off the three async git data fetches (changes, numstats, ignored snapshot) in parallel
+--- Kick off the async git data fetches (changes, numstats, and ignored snapshot only if needed)
 --- using bsi.cmd (vim.system). When all complete we build the real tree and render.
 function Tree:_start_async_git_fetch()
   if self._git_fetch_started then return end
   self._git_fetch_started = true
-  self._git_fetch_pending = 3
+
+  local need_ignored = self.show_ignored == true
+  self._git_fetch_pending = need_ignored and 3 or 2
 
   local function on_done_one()
     self._git_fetch_pending = self._git_fetch_pending - 1
@@ -1007,7 +1014,16 @@ function Tree:_start_async_git_fetch()
 
   self:_fetch_git_changes_async(on_done_one)
   self:_fetch_git_numstats_async(on_done_one)
-  self:_fetch_git_ignored_snapshot_async(on_done_one)
+
+  if need_ignored then
+    self:_fetch_git_ignored_snapshot_async(on_done_one)
+  else
+    -- Feature disabled (or show_ignored=false): don't collect gitignore snapshot at all.
+    -- Only the cheap DEFAULT_IGNORE name patterns + dotfiles will be hidden.
+    -- This avoids the whole "is this in .gitignore" machinery for now.
+    self.provider._ignored_snapshot = nil
+    self.provider._ignored_dir_prefixes = nil
+  end
 end
 
 --- Async fetch for porcelain git status (including untracked dir expansion).
@@ -1258,7 +1274,6 @@ function Tree:_complete_initial_scan()
     expand_all = false,
     git_only = false,
     show_ignored = self.show_ignored,
-    max_depth = (not (self.opts and self.opts.git_only)) and 1 or nil,
   }, {
     git_changes = self._git_changes,
     git_numstats = self._git_numstats,
@@ -1337,7 +1352,7 @@ function Tree:_complete_initial_scan()
     self:_update_winbar()
   end
 
-  -- Seed from the currently opened file (the "only the file the user cares about" behavior)
+  -- Seed from the currently opened file so the tree selection is on it.
   local opened_path = M.get_opened_file()
   if opened_path ~= "" then
     self:find_file(opened_path)
@@ -1438,10 +1453,8 @@ function Tree:open()
     vim.wo[self.winid].winbar = render_title(base .. " (loading...)")
   end
 
-  -- Best-effort: ensure the single tracked opened file (the one the user is editing)
-  -- has its ancestor chain populated and selected. With max_depth-bounded initial
-  -- scans this is what "seeds" the useful part of the tree without walking everything.
-  -- Safe to call even if the file is not under this root (find_file early-returns).
+  -- Best-effort: ensure the single tracked opened file has its ancestor chain
+  -- populated and selected.
   local opened = M.get_opened_file()
   if opened ~= "" then
     self:find_file(opened)
@@ -1530,9 +1543,10 @@ function Tree:refresh()
     self:render()
   end
 
-  -- Re-fetch everything asynchronously (re-uses the same three fetchers + completion)
+  -- Re-fetch asynchronously. The starter will only request the ignored snapshot
+  -- if show_ignored is currently true.
   self._git_fetch_started = false
-  self._git_fetch_pending = 3
+  self._git_fetch_pending = self.show_ignored and 3 or 2
   self:_start_async_git_fetch()
 end
 
@@ -1540,7 +1554,7 @@ end
 function Tree:toggle_show_ignored()
   self.show_ignored = not (self.show_ignored or false)
 
-  -- Clear caches so gitignore checks are re-evaluated
+  -- Clear caches so gitignore checks are re-evaluated (if the feature is re-enabled)
   if self.provider then
     self.provider._ignored_cache = {}
     self.provider._git_root = nil
@@ -2120,7 +2134,7 @@ function M.toggle_tree()
   M.the_tree = t
 
   -- Position on the opened file (so the tree selection is on it), then return
-  -- focus to the editing buffer (keep focus on the opened file, not the tree).
+  -- focus to the editing buffer.
   local opened_path = M.get_opened_file()
   if opened_path ~= "" then
     t:find_file(opened_path)
@@ -2269,9 +2283,8 @@ function M.setup(opts)
         return
       end
 
-      -- Only sync tree selection (find_file + possible ancestor expand + render)
-      -- when the *opened file actually changed*. This avoids paying the walk+render
-      -- cost on every BufEnter (quickfix, help, terminals, tree itself, etc).
+      -- Only sync tree selection (find_file + render) when the opened file actually changed.
+      -- With full depth root scan, this is now just cheap cursor positioning + current file highlight.
       if path ~= M._last_synced_file then
         M._last_synced_file = path
         for _, tree in pairs(M.instances) do
