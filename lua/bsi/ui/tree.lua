@@ -24,9 +24,12 @@ M.opened_buffer = nil
 
 --- Default configuration for the tree
 M.config = {
-  -- Whether to show hidden (dot) files/directories and git-ignored files by default.
-  -- Can be toggled at runtime with the "h" key inside a tree.
-  -- Disabled for now (no gray gitignore highlights) — will revisit the implementation later.
+  -- show_ignored controls *visibility* of gitignored + dot items (they appear gray when true).
+  -- Default false means they are filtered out early in the fs_scandir loop.
+  -- The snapshot (via bsi.git.status runner + Project) is *always* collected now so
+  -- that hiding uses the full optimizations: early filter before node creation (#1),
+  -- path_ignored short-circuit + negative toplevel cache (#2), parent_ignored prop (#4),
+  -- precomputed dirs, one-shot correct command, etc. Toggle with 'h'.
   show_ignored = false,
 }
 
@@ -439,6 +442,20 @@ end
 ---@param root string
 ---@return table|nil  Map of absolute path -> true for directly reported ignored paths.
 function Provider:_get_git_ignored_snapshot(root)
+  -- Legacy sync path. Prefer the centralized runner from the plan implementation.
+  local git = require("bsi.git")
+  if git.is_git_integration_enabled and git.is_git_integration_enabled() then
+    local map = git.run_git_status and git.run_git_status(root) or nil
+    if map then
+      local ignored = {}
+      for p, xy in pairs(map) do
+        if xy == "!!" then ignored[p] = true end
+      end
+      return next(ignored) and ignored or nil
+    end
+  end
+
+  -- Fallback (should almost never be reached now)
   local req_root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
   req_root = vim.fn.resolve(req_root):gsub("/$", "")
 
@@ -452,6 +469,7 @@ function Provider:_get_git_ignored_snapshot(root)
   git_root = vim.fn.resolve(git_root):gsub("/$", "")
 
   -- Include ignored entries (status "!!"). -z for robustness; we normalize later.
+  -- NOTE: this fallback is missing --no-optional-locks / -u that the plan+new runner use.
   local cmd = "git -C " .. vim.fn.shellescape(git_root) .. " status --porcelain=v1 -z --ignored=matching"
   local handle = io.popen(cmd)
   if not handle then return nil end
@@ -461,7 +479,6 @@ function Provider:_get_git_ignored_snapshot(root)
   if result == "" then return nil end
 
   local ignored = {}
-  -- Split on NUL (porcelain -z). Lines are "XY path\0" (or "XY orig\0 -> \0new" for renames, but ignored are simple).
   for entry in vim.gsplit(result, "\0", { plain = true, trimempty = true }) do
     if entry == "" then goto continue end
     local status = entry:sub(1, 2)
@@ -470,8 +487,6 @@ function Provider:_get_git_ignored_snapshot(root)
     if status == "!!" and path and path ~= "" then
       local full = (git_root .. "/" .. path):gsub("/+$", "")
       ignored[full] = true
-      -- Also mark the parent chain lightly so prefix checks are cheap if needed;
-      -- but we primarily rely on exact + the under_ignored propagation in scan.
     end
     ::continue::
   end
@@ -612,6 +627,17 @@ function Provider:_is_git_ignored(fullpath)
   end
 
   -- Legacy per-path fallback (should rarely be reached now).
+  -- Prefer any already-loaded Project from the centralized bsi.git.status (optimization #2 + #4).
+  local git = require("bsi.git")
+  if git.status and git.status._projects_by_toplevel then
+    for _, proj in pairs(git.status._projects_by_toplevel) do
+      if proj.path_ignored_in_project and proj:path_ignored_in_project(fullpath) then
+        self._ignored_cache[fullpath] = true
+        return true
+      end
+    end
+  end
+
   if self._git_root == nil then
     local dir = vim.fn.isdirectory(fullpath) == 1 and fullpath or vim.fn.fnamemodify(fullpath, ":h")
     local out = vim.fn.systemlist({ "git", "-C", dir, "rev-parse", "--show-toplevel" })
@@ -996,14 +1022,22 @@ function Tree.new(opts)
   return self
 end
 
---- Kick off the async git data fetches (changes, numstats, and ignored snapshot only if needed)
---- using bsi.cmd (vim.system). When all complete we build the real tree and render.
+--- Kick off the async git data fetches (changes + numstats + ignored snapshot/Project).
+--- The snapshot is always fetched so filtering in scan() is accurate and cheap.
+--- show_ignored only decides whether gitignored nodes are created or omitted+counted as hidden.
+--- Uses bsi.cmd (vim.system) + the bsi.git.status runner for the ignored part.
 function Tree:_start_async_git_fetch()
   if self._git_fetch_started then return end
   self._git_fetch_started = true
 
-  local need_ignored = self.show_ignored == true
-  self._git_fetch_pending = need_ignored and 3 or 2
+  -- Always collect the full git data (changes + numstats + ignored snapshot via the
+  -- optimized bsi.git.status runner + Project). This is required for correct, cheap
+  -- gitignore filtering during the fs_scandir loop (optimization #1 + #2 + #4).
+  -- The `show_ignored` flag only controls *application* of the git_ignored filter:
+  --   false (default) = skip creation of gitignored nodes (hide them)
+  --   true  = create them (but marked git_ignored for gray rendering + shallow population)
+  -- The expensive per-path check-ignore is avoided; we use one-shot snapshot + prefix + parent propagation.
+  self._git_fetch_pending = 3
 
   local function on_done_one()
     self._git_fetch_pending = self._git_fetch_pending - 1
@@ -1014,16 +1048,7 @@ function Tree:_start_async_git_fetch()
 
   self:_fetch_git_changes_async(on_done_one)
   self:_fetch_git_numstats_async(on_done_one)
-
-  if need_ignored then
-    self:_fetch_git_ignored_snapshot_async(on_done_one)
-  else
-    -- Feature disabled (or show_ignored=false): don't collect gitignore snapshot at all.
-    -- Only the cheap DEFAULT_IGNORE name patterns + dotfiles will be hidden.
-    -- This avoids the whole "is this in .gitignore" machinery for now.
-    self.provider._ignored_snapshot = nil
-    self.provider._ignored_dir_prefixes = nil
-  end
+  self:_fetch_git_ignored_snapshot_async(on_done_one)
 end
 
 --- Async fetch for porcelain git status (including untracked dir expansion).
@@ -1043,9 +1068,69 @@ function Tree:_fetch_git_changes_async(done)
       git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
       git_root = vim.fn.resolve(git_root):gsub("/$", "")
 
-      -- Now the real status (we request ignored here too so the same data can feed the snapshot if desired,
-      -- but we keep a dedicated ignored snapshot for clarity and to include untracked-ignored reliably).
-      Cmd.new({ "git", "-C", git_root, "status", "--porcelain" }, {
+      -- Opportunistic reuse of the Project (seeded by the always-on ignored snapshot fetch).
+      -- The runner command we use for ignored already gives a full XY map (including ??, M , etc.).
+      -- This avoids a duplicate `git status` process (saves real time on large repos).
+      -- We still run the untracked-dir expansion for ?? dirs (needed for git_only + injection).
+      local git = require("bsi.git")
+      local proj = git.status and git.status._projects_by_toplevel and git.status._projects_by_toplevel[git_root]
+      if proj and proj.files and next(proj.files) then
+        local changes = {}
+        changes[git_root] = { status = "dir" }
+
+        local function under_req(p)
+          return p == req_root or p:sub(1, #req_root + 1) == req_root .. "/"
+        end
+
+        for full, xy in pairs(proj.files) do
+          if xy ~= "!!" then
+            if under_req(full) then
+              changes[full] = { status = xy }
+              local current = full
+              while #current > #git_root do
+                current = vim.fn.fnamemodify(current, ":h")
+                if not changes[current] then
+                  changes[current] = { status = "dir" }
+                elseif changes[current].status ~= "dir" then
+                  break
+                end
+                if current == git_root then break end
+              end
+            end
+          end
+        end
+
+        -- Replicate the ?? untracked dir full expansion (list every file inside)
+        for fullpath, info in pairs(changes) do
+          if info.status == "??" and vim.fn.isdirectory(fullpath) == 1 then
+            local function mark_untracked(p)
+              if under_req(p) then changes[p] = { status = "??" } end
+              local h = vim.loop.fs_scandir(p)
+              if h then
+                while true do
+                  local name, typ = vim.loop.fs_scandir_next(h)
+                  if not name then break end
+                  local fp = p .. "/" .. name
+                  if typ == "directory" then
+                    mark_untracked(fp)
+                  else
+                    if under_req(fp) then changes[fp] = { status = "??" } end
+                  end
+                end
+              end
+            end
+            mark_untracked(fullpath)
+          end
+        end
+
+        self._git_changes = changes
+        done()
+        return
+      end
+
+      -- Fallback (no Project yet, or race): run the status ourselves (with no-optional-locks).
+      -- The new GitRunner can be unified further in a later pass to have a single status call feed both.
+      Cmd.new({ "git", "--no-optional-locks", "-C", git_root, "status", "--porcelain" }, {
         on_success = function(c2)
           local result = c2:job().stdout or ""
           if result == "" then
@@ -1200,66 +1285,80 @@ function Tree:_fetch_git_numstats_async(done)
   })
 end
 
---- Async fetch for the gitignored snapshot (the key perf piece).
---- Uses the same --ignored=matching status so we get "!!" entries in one shot.
+--- Async fetch for the gitignored snapshot / full Project (the key perf piece).
+--- Always performed (decoupled from show_ignored) so the scandir filter in _should_skip
+--- and parent_ignored propagation have the snapshot + prefix checks for O(1) decisions.
+--- Delegates to bsi.git.status GitRunner (correct flags, parser, timeout guard, Project cache).
 function Tree:_fetch_git_ignored_snapshot_async(done)
   local req_root = self.root_path
 
-  Cmd.new({ "git", "-C", req_root, "rev-parse", "--show-toplevel" }, {
-    on_success = function(c)
-      local git_root = vim.trim(c:job().stdout or "")
-      if git_root == "" then
-        self.provider._ignored_snapshot = {}
-        self.provider._ignored_dir_prefixes = nil
-        done()
-        return
+  local git = require("bsi.git")
+
+  -- Fast path: if we already have a Project for this root, reuse its files map.
+  local proj = git.load_project(req_root)
+  if proj and proj.files and next(proj.files) then
+    local ignored = {}
+    local prefixes = {}
+    for p, xy in pairs(proj.files) do
+      if xy == "!!" then
+        ignored[p] = true
+        if vim.fn.isdirectory(p) == 1 then
+          table.insert(prefixes, p)
+        end
       end
-      git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
-      git_root = vim.fn.resolve(git_root):gsub("/$", "")
+    end
+    self.provider._ignored_snapshot = ignored
+    self.provider._ignored_dir_prefixes = next(prefixes) and prefixes or nil
+    done()
+    return
+  end
 
-      Cmd.new({ "git", "-C", git_root, "status", "--porcelain=v1", "-z", "--ignored=matching" }, {
-        on_success = function(c2)
-          local result = c2:job().stdout or ""
-          local ignored = {}
-
-          for entry in vim.gsplit(result, "\0", { plain = true, trimempty = true }) do
-            if entry == "" then goto cont end
-            local status = entry:sub(1, 2)
-            local path = entry:sub(4)
-            if path:match('^"') then path = path:match('^"(.*)"$') or path end
-            if status == "!!" and path and path ~= "" then
-              local full = (git_root .. "/" .. path):gsub("/+$", "")
-              ignored[full] = true
-            end
-            ::cont::
-          end
-
-          self.provider._ignored_snapshot = ignored
-          self.provider._ignored_dir_prefixes = nil
-          if next(ignored) then
-            local prefixes = {}
-            for p in pairs(ignored) do
-              if vim.fn.isdirectory(p) == 1 then
-                table.insert(prefixes, p)
-              end
-            end
-            self.provider._ignored_dir_prefixes = prefixes
-          end
-          done()
-        end,
-        on_error = function()
-          self.provider._ignored_snapshot = {}
-          self.provider._ignored_dir_prefixes = nil
-          done()
-        end,
-      })
-    end,
-    on_error = function()
+  -- Otherwise do a fresh async collection via the new runner (also seeds the Project cache).
+  git.run_git_status_async(req_root, nil, {
+    -- timeout handled inside the runner
+  }, function(map, err)
+    if not map then
       self.provider._ignored_snapshot = {}
       self.provider._ignored_dir_prefixes = nil
       done()
-    end,
-  })
+      return
+    end
+
+    -- Seed a Project so future loads (and watchers) are fast.
+    -- We don't call load_project again because the runner already produced the data.
+    local toplevel = git.get_toplevel(req_root) or req_root
+    local Project = git.status.Project
+    local fresh = Project.new(toplevel)
+    fresh.files = map
+    fresh._ignored_dir_prefixes = {}
+    for p, xy in pairs(map) do
+      if xy == "!!" and vim.fn.isdirectory(p) == 1 then
+        table.insert(fresh._ignored_dir_prefixes, p)
+      end
+    end
+    fresh:_build_dirs()
+    git.status._projects_by_toplevel[toplevel] = fresh
+
+    -- Start the narrow .git watcher for this project (if not already).
+    if not fresh.watcher then
+      fresh:start_watcher(function() end)
+    end
+
+    local ignored = {}
+    local prefixes = {}
+    for p, xy in pairs(map) do
+      if xy == "!!" then
+        ignored[p] = true
+        if vim.fn.isdirectory(p) == 1 then
+          table.insert(prefixes, p)
+        end
+      end
+    end
+
+    self.provider._ignored_snapshot = ignored
+    self.provider._ignored_dir_prefixes = next(prefixes) and prefixes or nil
+    done()
+  end)
 end
 
 --- Called when all async git data has arrived (from either initial construction or a refresh).
@@ -1543,18 +1642,21 @@ function Tree:refresh()
     self:render()
   end
 
-  -- Re-fetch asynchronously. The starter will only request the ignored snapshot
-  -- if show_ignored is currently true.
+  -- Re-fetch asynchronously. We always request the full set (changes + numstats + ignored snapshot)
+  -- for correct filtering. show_ignored only affects node creation in the subsequent scan.
   self._git_fetch_started = false
-  self._git_fetch_pending = self.show_ignored and 3 or 2
+  self._git_fetch_pending = 3
   self:_start_async_git_fetch()
 end
 
---- Toggles visibility of hidden (dot) files and git-ignored files/directories
+--- Toggles visibility of hidden (dot) files and git-ignored files/directories.
+--- The git data (snapshot/Project) is collected unconditionally for correct filtering.
+--- This flag only changes whether gitignored paths are skipped at scan time or included (grayed, shallow).
 function Tree:toggle_show_ignored()
   self.show_ignored = not (self.show_ignored or false)
 
-  -- Clear caches so gitignore checks are re-evaluated (if the feature is re-enabled)
+  -- Clear per-provider caches so re-scan applies the new visibility/filter decision.
+  -- The Project in bsi.git.status keeps the raw data and will be reused or refreshed.
   if self.provider then
     self.provider._ignored_cache = {}
     self.provider._git_root = nil
@@ -2254,6 +2356,31 @@ function M.setup(opts)
   vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitIgnored",  { fg = "#5c6370", bg = "NONE" })  -- grey for git-ignored files/dirs when shown via show_ignored
+
+  -- Commands for the git status integration (from the detailed implementation plan)
+  vim.api.nvim_create_user_command("BSIGitEnable", function()
+    local git = require("bsi.git")
+    git.enable_git_integration()
+    vim.notify("BSI Git integration re-enabled. Refresh any open trees (R) to pick up status again.", vim.log.levels.INFO)
+  end, { desc = "Re-enable git status / gitignore tracking after degradation or manual disable" })
+
+  vim.api.nvim_create_user_command("BSIGitDisable", function()
+    local git = require("bsi.git")
+    git.disable_git_integration("user command")
+    vim.notify("BSI Git integration disabled. Use :BSIGitEnable to restore.", vim.log.levels.WARN)
+  end, { desc = "Temporarily disable all git status / gitignore work (graceful degradation)" })
+
+  vim.api.nvim_create_user_command("BSIGitStatus", function()
+    local git = require("bsi.git")
+    local status = git.status
+    local msg = string.format(
+      "Git integration: %s | consecutive timeouts: %d | projects cached: %d",
+      status.is_git_integration_enabled() and "ENABLED" or ("DISABLED (" .. (status._last_disable_reason or "unknown") .. ")"),
+      status._consecutive_timeouts or 0,
+      vim.tbl_count(status._projects_by_toplevel or {})
+    )
+    vim.notify(msg, vim.log.levels.INFO)
+  end, { desc = "Show current state of the bsi.git.status runner / project manager" })
 
   local group = vim.api.nvim_create_augroup("BSITreeTracking", { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {

@@ -198,4 +198,21 @@ function M.get_current_line_commits(file_path, line_number)
     return lines
 end
 
+-- Git status / project manager for trees and other consumers (gitignore, porcelain status, etc.)
+-- Implemented per the detailed "from scratch" plan.
+M.status = require("bsi.git.status")
+
+-- Convenience aliases for the most common operations used by the tree
+M.get_toplevel = M.status.get_toplevel
+M.load_project = M.status.GitManager.load_project
+M.load_project_async = M.status.GitManager.load_project_async
+M.run_git_status = M.status.run
+M.run_git_status_async = M.status.run_async
+M.parse_git_status = M.status.parse
+
+-- Global enable/disable (used after degradation or by user command)
+M.enable_git_integration = M.status.enable_git_integration
+M.disable_git_integration = M.status.disable_git_integration
+M.is_git_integration_enabled = M.status.is_git_integration_enabled
+
 return M
