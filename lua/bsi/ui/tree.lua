@@ -68,6 +68,9 @@ function Renderer:render(bufnr, nodes, winid)
   local lines = {}
   local highlights = {}
 
+  -- Small indent cache (depths are small in practice)
+  local indent_cache = { ["0"] = "", ["1"] = " ", ["2"] = "  ", ["3"] = "   ", ["4"] = "    " }
+
   -- Use the tracked opened buffer (the single one the user works with).
   -- This is set in setup's BufEnter and is reliable even when the tree sidebar
   -- itself is focused (avoids the old window scan picking the tree buf or wrong split).
@@ -78,7 +81,7 @@ function Renderer:render(bufnr, nodes, winid)
     -- Subtract 1 for display indent so first level has no leading spaces.
     local display_depth = node.depth - 1
     if display_depth < 0 then display_depth = 0 end
-    local indent = string.rep(" ", display_depth)
+    local indent = indent_cache[tostring(display_depth)] or string.rep(" ", display_depth)
     local arrow = "  "
     local icon = ""
     local icon_hl = nil
@@ -195,8 +198,9 @@ function Renderer:render(bufnr, nodes, winid)
       end
     end
 
+    -- Build line with table.concat (fewer temp strings)
     local gap = " "
-    local base_content = indent .. arrow .. icon .. gap .. node.name
+    local parts = { indent, arrow, icon, gap, node.name }
 
     -- Git detail: +N-M for files, AMD letters for directories (no brackets)
     local detail = ""
@@ -210,20 +214,18 @@ function Renderer:render(bufnr, nodes, winid)
       detail = " " .. node.git_status_summary
     end
     if detail ~= "" then
-      base_content = base_content .. detail
+      parts[#parts + 1] = detail
     end
 
-    -- Fixed column for git status (single-char compact indicator)
-    local status_col = 34
+    local base_content = table.concat(parts)
+
+    -- Status prefix for directories (single char). We keep a lightweight right-ish placement
+    -- instead of expensive rigid padding for every line.
     local status_text = git_status_prefix
     local line_content = base_content
     if status_text ~= "" then
-      local padding = status_col - #base_content
-      if padding > 0 then
-        line_content = base_content .. string.rep(" ", padding) .. status_text
-      else
-        line_content = base_content .. " " .. status_text
-      end
+      -- Minimal separator instead of fixed-column padding (cheaper + simpler)
+      line_content = base_content .. "  " .. status_text
     end
 
     table.insert(lines, line_content)
@@ -266,62 +268,58 @@ function Renderer:render(bufnr, nodes, winid)
 
     -- Apply git detail coloring
     if detail ~= "" then
-      local detail_start = name_start + #node.name
+      -- detail_start is right after the node name in the final line
+      local name_end = name_start + #node.name
+      local detail_start = name_end
 
       if node.git_numstat then
-        -- For files: always split +NN (green) and -MM (red)
-        -- Example: " +34-23" → +34 in BSITreeGitAdded, -23 in BSITreeGitDeleted
-        local plus_idx = detail:find("%+")
-        local minus_idx = detail:find("%-")
-
-        if plus_idx then
-          local plus_start = detail_start + plus_idx - 1
-          local minus_start = minus_idx and (detail_start + minus_idx - 1) or (detail_start + #detail)
+        -- We control the format " +A-D" so we can compute offsets directly (no find)
+        -- detail example: " +12-3"  -> positions relative: 1:' ',2:'+', ...
+        if detail:sub(2,2) == "+" then
+          -- +NN starts at detail_start + 1
+          local plus_start = detail_start + 1
+          local dash = detail:find("%-", 3, true) or (#detail + 1)
+          local minus_start = detail_start + dash - 1
           table.insert(highlights, {
-            hl = "BSITreeGitAdded", -- green
+            hl = "BSITreeGitAdded",
             line = i - 1,
             col_start = plus_start,
             col_end = minus_start,
           })
+          if dash then
+            table.insert(highlights, {
+              hl = "BSITreeGitDeleted",
+              line = i - 1,
+              col_start = minus_start,
+              col_end = detail_start + #detail,
+            })
+          end
         end
+      elseif detail_hl and node.git_status_summary then
+        -- Per-letter coloring for directory git summary: A(green), M(orange), D(red)
+        local summary = node.git_status_summary
+        for j = 1, #summary do
+          local letter = summary:sub(j, j)
+          local hl = (letter == "A" and "BSITreeGitAdded")
+                  or (letter == "M" and "BSITreeGitModified")
+                  or (letter == "D" and "BSITreeGitDeleted")
+                  or "Special"
 
-        if minus_idx then
-          local minus_start = detail_start + minus_idx - 1
+          local letter_col = detail_start + 1 + (j - 1)
           table.insert(highlights, {
-            hl = "BSITreeGitDeleted", -- red
+            hl = hl,
             line = i - 1,
-            col_start = minus_start,
-            col_end = detail_start + #detail,
+            col_start = letter_col,
+            col_end = letter_col + 1,
           })
         end
       elseif detail_hl then
-        if node.git_status_summary then
-          -- Per-letter coloring for directory git summary: A(green), M(orange), D(red)
-          local summary = node.git_status_summary
-          for j = 1, #summary do
-            local letter = summary:sub(j, j)
-            local hl = (letter == "A" and "BSITreeGitAdded")
-                    or (letter == "M" and "BSITreeGitModified")
-                    or (letter == "D" and "BSITreeGitDeleted")
-                    or "Special"
-
-            local letter_col = detail_start + 1 + (j - 1)  -- after the leading space
-            table.insert(highlights, {
-              hl = hl,
-              line = i - 1,
-              col_start = letter_col,
-              col_end = letter_col + 1,
-            })
-          end
-        else
-          -- Fallback for other directory cases (single color)
-          table.insert(highlights, {
-            hl = detail_hl,
-            line = i - 1,
-            col_start = detail_start,
-            col_end = detail_start + #detail,
-          })
-        end
+        table.insert(highlights, {
+          hl = detail_hl,
+          line = i - 1,
+          col_start = detail_start,
+          col_end = detail_start + #detail,
+        })
       end
     end
   end
@@ -978,24 +976,42 @@ function Tree.new(opts)
     self.show_ignored = M.config.show_ignored
   end
 
-  -- IMMEDIATE PATH: set up a minimal placeholder so open() + render() can happen
-  -- with zero blocking git/fs work. The real tree (with git data + children) will
-  -- be built asynchronously and rendered when ready.
+  -- Fast synchronous filesystem scan for instant directory listing.
+  -- Git state (status, ignored files, numstat, decorations) is calculated in the
+  -- background via async fetches and applied when ready (may trigger re-scan + re-render).
+  -- This makes the basic tree appear immediately even if git commands are slow.
   self._git_changes = nil
   self._git_numstats = nil
   self.provider._ignored_snapshot = nil
   self.provider._ignored_dir_prefixes = nil
   self._git_fetch_pending = 0
   self._git_fetch_started = false
+
+  -- Bounded initial scan for performance: only populate direct children of root by default.
+  -- Deeper directories are created as stubs (_unpopulated=true or _shallow_ignored).
+  -- toggle(), find_file(), and expand paths populate on demand.
+  -- Only use full depth for explicit expand_all.
+  local initial_max_depth = opts.expand_all and nil or 1
+
   self._initial_scan_opts = {
     expand_all = opts.expand_all,
     git_only = false,
     show_ignored = self.show_ignored,
+    max_depth = initial_max_depth,
   }
 
-  -- Placeholder root so the UI can appear instantly (empty children until data arrives)
+  -- Quick *synchronous* fs directory read (provider:scan) for instant visible tree.
+  -- Only cheap name-based filters (DEFAULT_IGNORE + ^%. dots) for now.
+  -- Full git state (ignored pruning, git_status, numstat, dir summaries) is calculated
+  -- asynchronously in the background fetches; when ready we re-scan with the data
+  -- and re-render. This matches the request: directory listing fast+sync, git in bg.
+  local quick_opts = vim.tbl_extend("force", self._initial_scan_opts, {
+    git_changes = nil,
+    git_numstats = nil,
+  })
+  local quick_root = self.provider:scan(self.root_path, 0, quick_opts)
   self.state = {
-    root = {
+    root = quick_root or {
       id = self.root_path,
       name = vim.fn.fnamemodify(self.root_path, ":t"),
       path = self.root_path,
@@ -1007,8 +1023,8 @@ function Tree.new(opts)
   }
   self._visible_dirty = true
 
-  -- Kick off async git data collection (changes + numstats + ignored snapshot) in parallel.
-  -- When all are ready we perform the real (bounded) scan and render if the tree is open.
+  -- Kick off async git data collection in background. When ready,
+  -- _complete_initial_scan will (re)build with full git info.
   self:_start_async_git_fetch()
 
   -- For git_only views we still want the "auto expand changed" behavior once data is ready
@@ -1067,6 +1083,7 @@ function Tree:_fetch_git_changes_async(done)
       end
       git_root = vim.fn.fnamemodify(git_root, ":p"):gsub("/$", "")
       git_root = vim.fn.resolve(git_root):gsub("/$", "")
+      self._git_toplevel = git_root
 
       -- Opportunistic reuse of the Project (seeded by the always-on ignored snapshot fetch).
       -- The runner command we use for ignored already gives a full XY map (including ??, M , etc.).
@@ -1213,6 +1230,67 @@ end
 function Tree:_fetch_git_numstats_async(done)
   local root = self.root_path
 
+  local cached = self._git_toplevel
+  if cached and cached ~= "" then
+    -- Fast path: reuse toplevel discovered elsewhere (changes or ignored fetch)
+    local git_root = cached
+    local stats = {}
+
+    local function parse_and_merge(output)
+      for line in output:gmatch("[^\r\n]+") do
+        local added_str, deleted_str, path = line:match("^(%S+)%s+(%S+)%s+(.+)$")
+        if not added_str or not deleted_str or not path then goto continue end
+
+        if path:match(" => ") then
+          path = vim.split(path, " => ")[2] or path
+        end
+        if path:match('^"') then
+          path = path:match('^"(.*)"$') or path
+        end
+
+        local added = (added_str == "-") and 0 or (tonumber(added_str) or 0)
+        local deleted = (deleted_str == "-") and 0 or (tonumber(deleted_str) or 0)
+
+        local fullpath = (git_root .. "/" .. path):gsub("/$", "")
+
+        if stats[fullpath] then
+          stats[fullpath].added = stats[fullpath].added + added
+          stats[fullpath].deleted = stats[fullpath].deleted + deleted
+        else
+          stats[fullpath] = { added = added, deleted = deleted }
+        end
+        ::continue::
+      end
+    end
+
+    local pending = 2
+    local function maybe_done()
+      pending = pending - 1
+      if pending == 0 then
+        self._git_numstats = next(stats) and stats or nil
+        done()
+      end
+    end
+
+    Cmd.new({ "git", "-C", git_root, "diff", "--numstat" }, {
+      on_success = function(c1)
+        parse_and_merge(c1:job().stdout or "")
+        maybe_done()
+      end,
+      on_error = function() maybe_done() end,
+    })
+
+    Cmd.new({ "git", "-C", git_root, "diff", "--cached", "--numstat" }, {
+      on_success = function(c2)
+        parse_and_merge(c2:job().stdout or "")
+        maybe_done()
+      end,
+      on_error = function() maybe_done() end,
+    })
+    return
+  end
+
+  -- Fallback: discover toplevel ourselves
   Cmd.new({ "git", "-C", root, "rev-parse", "--show-toplevel" }, {
     on_success = function(c)
       local git_root = vim.trim(c:job().stdout or "")
@@ -1221,7 +1299,7 @@ function Tree:_fetch_git_numstats_async(done)
         done()
         return
       end
-      git_root = vim.trim(git_root)
+      self._git_toplevel = vim.trim(git_root)
 
       local stats = {}
 
@@ -1252,7 +1330,6 @@ function Tree:_fetch_git_numstats_async(done)
         end
       end
 
-      -- We launch the two diff commands in parallel and merge when both done.
       local pending = 2
       local function maybe_done()
         pending = pending - 1
@@ -1262,7 +1339,7 @@ function Tree:_fetch_git_numstats_async(done)
         end
       end
 
-      Cmd.new({ "git", "-C", git_root, "diff", "--numstat" }, {
+      Cmd.new({ "git", "-C", self._git_toplevel, "diff", "--numstat" }, {
         on_success = function(c1)
           parse_and_merge(c1:job().stdout or "")
           maybe_done()
@@ -1270,7 +1347,7 @@ function Tree:_fetch_git_numstats_async(done)
         on_error = function() maybe_done() end,
       })
 
-      Cmd.new({ "git", "-C", git_root, "diff", "--cached", "--numstat" }, {
+      Cmd.new({ "git", "-C", self._git_toplevel, "diff", "--cached", "--numstat" }, {
         on_success = function(c2)
           parse_and_merge(c2:job().stdout or "")
           maybe_done()
@@ -1327,6 +1404,7 @@ function Tree:_fetch_git_ignored_snapshot_async(done)
     -- Seed a Project so future loads (and watchers) are fast.
     -- We don't call load_project again because the runner already produced the data.
     local toplevel = git.get_toplevel(req_root) or req_root
+    self._git_toplevel = toplevel
     local Project = git.status.Project
     local fresh = Project.new(toplevel)
     fresh.files = map
@@ -1362,33 +1440,42 @@ function Tree:_fetch_git_ignored_snapshot_async(done)
 end
 
 --- Called when all async git data has arrived (from either initial construction or a refresh).
---- Builds/scans the tree with the new data. If a refresh restore was pending, it performs
---- the expansion preservation logic. Otherwise it does the normal initial post-scan work.
+--- Re-scans the tree with git data now available (changes, numstats, ignored snapshot).
+--- This is the "background" step that adds git status, ignored filtering, decorations etc.
+--- The fast sync fs scan already happened in new() for instant UI.
+--- If a refresh restore was pending, it performs the expansion preservation logic.
 function Tree:_complete_initial_scan()
   local is_refresh = self._pending_refresh_restore ~= nil
   local restore_info = self._pending_refresh_restore
   self._pending_refresh_restore = nil
 
-  local scan_opts = vim.tbl_extend("force", self._initial_scan_opts or {
-    expand_all = false,
-    git_only = false,
-    show_ignored = self.show_ignored,
-  }, {
-    git_changes = self._git_changes,
-    git_numstats = self._git_numstats,
-    show_ignored = self.show_ignored,
-  })
+  local new_root = nil
 
-  local new_root = self.provider:scan(self.root_path, 0, scan_opts)
-  new_root = new_root or {
-    id = self.root_path,
-    name = vim.fn.fnamemodify(self.root_path, ":t"),
-    path = self.root_path,
-    type = "root",
-    depth = 0,
-    expanded = true,
-    children = {},
-  }
+  if is_refresh then
+    -- Refresh path still needs a real FS re-scan to pick up structural changes + restore expansion.
+    local effective_max_depth = nil
+    local scan_opts = vim.tbl_extend("force", self._initial_scan_opts or {
+      expand_all = false,
+      git_only = false,
+      show_ignored = self.show_ignored,
+    }, {
+      git_changes = self._git_changes,
+      git_numstats = self._git_numstats,
+      show_ignored = self.show_ignored,
+      max_depth = effective_max_depth,
+    })
+
+    new_root = self.provider:scan(self.root_path, 0, scan_opts)
+    new_root = new_root or {
+      id = self.root_path,
+      name = vim.fn.fnamemodify(self.root_path, ":t"),
+      path = self.root_path,
+      type = "root",
+      depth = 0,
+      expanded = true,
+      children = {},
+    }
+  end
 
   if is_refresh and restore_info then
     -- Restore expansion state (same logic as the old sync refresh)
@@ -1401,6 +1488,34 @@ function Tree:_complete_initial_scan()
       end
     end
     restore(new_root)
+
+    -- After marking expanded, populate children for any restored dirs that are still stubs
+    -- (important now that initial scans are bounded/shallow).
+    local function populate_expanded(node)
+      if (node.type == "directory" or node.type == "root") and node.expanded then
+        local needs = (not node.children or #node.children == 0) or node._unpopulated or node._shallow_ignored
+        if needs then
+          local so = {
+            git_changes = self._git_changes,
+            git_numstats = self._git_numstats,
+            show_ignored = self.show_ignored,
+          }
+          if node.git_ignored or node._shallow_ignored then
+            so._force_full_ignored_scan = true
+          end
+          local sc = self.provider:scan(node.path, node.depth, so)
+          if sc and sc.children then
+            node.children = sc.children
+          end
+          node._shallow_ignored = false
+          node._unpopulated = false
+        end
+      end
+      if node.children then
+        for _, child in ipairs(node.children) do populate_expanded(child) end
+      end
+    end
+    populate_expanded(new_root)
 
     if next(restore_info.full_ignored_paths or {}) then
       local function restore_full_ignored(node)
@@ -1439,8 +1554,26 @@ function Tree:_complete_initial_scan()
   end
 
   -- Normal initial completion path
-  self.state = { root = new_root }
-  self._visible_dirty = true
+  -- Prefer in-place decoration (no FS re-scan) for the quick shallow tree we already built.
+  -- This is the key perf win: git data is attached + summaries recomputed + pruning applied.
+  if self.state and self.state.root then
+    self:_apply_git_data_to_current_tree()
+  else
+    -- Fallback (should be rare): build a minimal root if we somehow have no prior state
+    self.state = {
+      root = {
+        id = self.root_path,
+        name = vim.fn.fnamemodify(self.root_path, ":t"),
+        path = self.root_path,
+        type = "root",
+        depth = 0,
+        expanded = true,
+        children = {},
+      },
+    }
+    self._visible_dirty = true
+    self:_apply_git_data_to_current_tree()
+  end
 
   if self.opts and self.opts.git_only then
     self:_expand_changed_dirs()
@@ -1452,6 +1585,7 @@ function Tree:_complete_initial_scan()
   end
 
   -- Seed from the currently opened file so the tree selection is on it.
+  -- find_file will expand ancestor chain on demand (on-demand scans receive the git data we just attached).
   local opened_path = M.get_opened_file()
   if opened_path ~= "" then
     self:find_file(opened_path)
@@ -1503,9 +1637,173 @@ function Tree:_node_has_git_activity(node)
   return false
 end
 
+--- Apply git data (changes, numstats, ignored snapshot) to the *existing* node tree.
+--- No new filesystem scan. Used after async git data arrives to avoid redundant full scans.
+--- Also recomputes directory git summaries. Prunes git-ignored nodes when show_ignored=false.
+function Tree:_apply_git_data_to_current_tree()
+  if not self.state or not self.state.root then return end
+  local changes = self._git_changes or {}
+  local numstats = self._git_numstats or {}
+  local ignored = self.provider._ignored_snapshot or {}
+  local ignored_prefixes = self.provider._ignored_dir_prefixes or {}
+  local show_ignored = self.show_ignored
+
+  local function is_ignored_path(p)
+    if ignored[p] then return true end
+    for _, pref in ipairs(ignored_prefixes) do
+      if p == pref or vim.startswith(p, pref .. "/") then return true end
+    end
+    return false
+  end
+
+  -- Bottom-up decoration + summary recompute
+  local function decorate(node, parent_ignored)
+    local p = node.path
+
+    -- numstat
+    local ns = numstats[p]
+    if ns and (ns.added or 0) + (ns.deleted or 0) > 0 then
+      node.git_numstat = ns
+    else
+      node.git_numstat = nil
+    end
+
+    -- raw status (files and dirs)
+    local ch = changes[p]
+    if ch and ch.status and ch.status ~= "dir" then
+      node.git_status = ch.status
+    end
+
+    -- ignored state (parent propagation + snapshot)
+    local this_ignored = parent_ignored or is_ignored_path(p)
+    node.git_ignored = this_ignored
+
+    if node.type == "directory" or node.type == "root" then
+      if node.children then
+        for _, c in ipairs(node.children) do
+          decorate(c, this_ignored)
+        end
+      end
+
+      -- Recompute DIR_* status and canonical summary (A/M/D) from children
+      -- (same rules as the original scan logic)
+      if changes and next(changes) and not node.git_ignored then
+        local all_staged, some_staged, some_unstaged, all_untracked = true, false, false, true
+        for _, c in ipairs(node.children) do
+          local s = c.git_status
+          if s then
+            if s == "DIR_ADDED" then some_staged = true; all_untracked = false
+            elseif s == "DIR_PARTIAL" then some_unstaged = true; all_staged = false; all_untracked = false
+            elseif s == "DIR_UNTRACKED" then some_unstaged = true; all_staged = false
+            else
+              local staged = s:sub(1,1)
+              local unstaged = s:sub(2,2)
+              if staged ~= "?" then all_untracked = false end
+              if staged ~= " " and staged ~= "?" then some_staged = true end
+              if unstaged ~= " " or staged == "?" then some_unstaged = true; all_staged = false end
+            end
+          else
+            if c.type == "file" then all_staged = false; all_untracked = false end
+            all_untracked = false
+          end
+        end
+
+        local dir_gs = nil
+        if all_untracked and some_unstaged then dir_gs = "DIR_UNTRACKED"
+        elseif all_staged and some_staged then dir_gs = "DIR_ADDED"
+        elseif some_staged or some_unstaged then
+          local statuses, chars = {}, {}
+          local function add_status(s)
+            if not s then return end
+            if s == "DIR_ADDED" then s = "A"
+            elseif s == "DIR_PARTIAL" then s = "M"
+            elseif s == "DIR_UNTRACKED" then s = "?"
+            end
+            for j = 1, #s do
+              local ch = s:sub(j, j)
+              if ch ~= " " and not statuses[ch] then
+                statuses[ch] = true
+                table.insert(chars, ch)
+              end
+            end
+          end
+          for _, c in ipairs(node.children) do add_status(c.git_status) end
+          table.sort(chars)
+          if #chars > 0 then dir_gs = "DIR_MULTI:" .. table.concat(chars, "") end
+        end
+        node.git_status = dir_gs
+
+        -- Canonical [DMA] summary
+        local has = { A = false, M = false, D = false }
+        local function mark(s)
+          if not s then return end
+          if s == "DIR_ADDED" or s == "DIR_UNTRACKED" then has.A = true; return end
+          if s == "DIR_PARTIAL" then has.A = true; has.M = true; return end
+          if type(s) == "string" and s:sub(1, 10) == "DIR_MULTI:" then
+            local rest = s:sub(11)
+            if rest:match("A") or rest:match("%?") then has.A = true end
+            if rest:match("[MRC]") then has.M = true end
+            if rest:match("D") then has.D = true end
+            return
+          end
+          if s:match("A") or s:match("%?") then has.A = true end
+          if s:match("[MRC]") then has.M = true end
+          if s:match("D") then has.D = true end
+        end
+        for _, c in ipairs(node.children) do
+          mark(c.git_status)
+          if c.git_status_summary then
+            if c.git_status_summary:match("A") then has.A = true end
+            if c.git_status_summary:match("M") then has.M = true end
+            if c.git_status_summary:match("D") then has.D = true end
+          end
+        end
+        local summary = ""
+        if has.D then summary = summary .. "D" end
+        if has.M then summary = summary .. "M" end
+        if has.A then summary = summary .. "A" end
+        node.git_status_summary = (#summary > 0) and summary or nil
+      end
+    end
+  end
+
+  decorate(self.state.root, false)
+
+  -- When not showing ignored, prune subtrees that are now known to be git-ignored.
+  -- This keeps the shallow tree correct after snapshot arrives.
+  if not show_ignored then
+    local function prune_ignored(node)
+      if not node.children then return end
+      local kept = {}
+      for _, c in ipairs(node.children) do
+        if c.git_ignored then
+          -- drop the whole subtree from visible structure
+        else
+          prune_ignored(c)
+          table.insert(kept, c)
+        end
+      end
+      node.children = kept
+    end
+    prune_ignored(self.state.root)
+  end
+
+  self._visible_dirty = true
+end
+
+
 --- Updates the tree buffer by flattening the state and calling the renderer
 function Tree:render()
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then return end
+
+  -- Lightweight throttle: many Buf* events and git callbacks can fire together.
+  -- Structural changes set _visible_dirty=true so they always go through.
+  local now = (vim.uv and vim.uv.now and vim.uv.now()) or 0
+  if not self._visible_dirty and self._last_render_ms and (now - self._last_render_ms) < 60 then
+    return
+  end
+  self._last_render_ms = now
+
   self.visible_nodes = self:get_visible_nodes()
   self.renderer:render(self.bufnr, self.visible_nodes, self.winid)
 end
@@ -1540,8 +1838,9 @@ function Tree:open()
 
   self:render()
 
-  -- If we're still waiting on the async git data, give a subtle hint in the winbar.
-  -- The real content (and the proper title) will appear when _complete_initial_scan runs.
+  -- The initial render above shows the fast sync fs scan (quick tree).
+  -- Git enhancements (statuses, ignored filtering, numstats) arrive later via
+  -- background completion and will trigger another render.
   if self._git_fetch_pending and self._git_fetch_pending > 0 and self.winid and vim.api.nvim_win_is_valid(self.winid) then
     local base = self:get_root_path()
     if self.opts and self.opts.git_only then base = "Git: " .. base end
@@ -1592,6 +1891,27 @@ function Tree:open()
   map("Y", function() self:_yank(true) end, "Yank relative path")
   map("<LeftMouse>", "<LeftMouse>", "Select node")
   map("<2-LeftMouse>", function() self:toggle() end, "Open file / Toggle directory (double-click)")
+
+  -- Standard Vim motions for top/bottom of the (visible) tree content.
+  -- Matches default nvim behavior in normal buffers (gg = first line, G = last line).
+  -- We explicitly set cursor on the win because visible_nodes map 1:1 to buffer lines.
+  -- Pure cursor motions: just move the cursor.
+  -- No re-render needed because the visible content and highlights haven't changed.
+  -- (Native cursorline + BSITreeCursorLine winhighlight handles the visual "selection".)
+  -- Compare to find_file/navigate_file which call render() because they can mutate
+  -- the tree structure (lazy expansion) and therefore need to rebuild buffer lines.
+  map("gg", function()
+    if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+      pcall(vim.api.nvim_win_set_cursor, self.winid, { 1, 0 })
+    end
+  end, "Go to top of tree")
+
+  map("G", function()
+    local nodes = self.visible_nodes or self:get_visible_nodes() or {}
+    if self.winid and vim.api.nvim_win_is_valid(self.winid) and #nodes > 0 then
+      pcall(vim.api.nvim_win_set_cursor, self.winid, { #nodes, 0 })
+    end
+  end, "Go to bottom of tree")
 end
 
 --- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
@@ -2027,15 +2347,18 @@ function Tree:find_file(target_path)
   if target_path:sub(1, #self.root_path) ~= self.root_path then return end
 
   -- Fast path: if target is already in the current visible list (e.g. same dir area,
-  -- or after prior expansion), just (re)select + render for CurrentFile highlight.
-  -- Avoids full ancestor walk + possible lazy scans on every file switch.
+  -- or after prior expansion), just move cursor. No render needed.
+  -- CurrentFile background highlight is driven by the real opened buffer (not tree cursor).
+  -- Native cursorline provides selection. Avoids full re-render on every BufEnter sync.
   if self.visible_nodes then
     for i, node in ipairs(self.visible_nodes) do
       if node.path == target_path then
         if self.winid and vim.api.nvim_win_is_valid(self.winid) then
           pcall(vim.api.nvim_win_set_cursor, self.winid, { i, 0 })
         end
-        self:render()
+        -- No render() needed: this is a pure cursor move inside already-visible nodes.
+        -- CurrentFile highlight is based on the actual opened buffer, not tree cursor.
+        -- Native cursorline handles visual selection.
         return
       end
     end
@@ -2182,7 +2505,8 @@ function Tree:navigate_file(direction)
       end
     end
     self:_open_file()
-    self:render()  -- update cursor line highlight etc in the tree view
+    -- Pure cursor move + file open. No need to re-render the tree content.
+    -- Cursorline is native; re-rendering would be wasteful for a simple navigation.
   end
 end
 
@@ -2393,16 +2717,10 @@ function M.setup(opts)
       -- itself or other splits when the user focuses the tree sidebar).
       M.set_opened_buffer(buf)
 
-      -- When focusing the BSI Tree buffer itself: just re-render (cheap) to keep
-      -- highlights in sync. Do *not* do a full refresh() here — that would re-run
-      -- git status + fs scan on every sidebar focus/click, which feels slow.
-      -- User can press R for explicit full resync of git/fs.
-      if M.instances[buf] then
-        local tree = M.instances[buf]
-        if tree.winid and vim.api.nvim_win_is_valid(tree.winid) then
-          tree:render()
-        end
-      end
+      -- When focusing the BSI Tree buffer itself: nothing to do for rendering.
+      -- Highlights live in extmarks (survive focus). Cursor selection is native cursorline.
+      -- We deliberately avoid re-rendering on every focus/CursorMoved (see comments in open()).
+      -- User can press R if they want a full git/fs resync.
 
       local path = vim.api.nvim_buf_get_name(buf)
       -- Only consider real file buffers for opened-file sync (skip tree, help, quickfix, terminals, etc.)

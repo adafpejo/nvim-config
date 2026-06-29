@@ -23,13 +23,15 @@ local autocmd = vim.api.nvim_create_autocmd
 
 local bsiGroup = augroup("bsi")
 
-vim.api.nvim_create_autocmd({"VimEnter"}, {
-    group = bsiGroup,
-    callback = function()
-        nt_api.tree.open({ update_root = true })
-        nt_api.tree.toggle()
-    end
-})
+-- Do not eagerly open nvim-tree on startup. The BSI tree (bsi.ui.tree) is the primary
+-- file tree used by <leader>ee / ge / layouts. nvim-tree is available as a fallback.
+-- vim.api.nvim_create_autocmd({"VimEnter"}, {
+--     group = bsiGroup,
+--     callback = function()
+--         nt_api.tree.open({ update_root = true })
+--         nt_api.tree.toggle()
+--     end
+-- })
 -- avoid new comment
 vim.api.nvim_create_autocmd("FileType", {
     group = bsiGroup,
