@@ -24,8 +24,9 @@ M.opened_buffer = nil
 
 --- Default configuration for the tree
 M.config = {
-  -- show_ignored controls *visibility* of gitignored + dot items (they appear gray when true).
-  -- Default false means they are filtered out early in the fs_scandir loop.
+  -- show_ignored controls visibility of gitignored items (shown gray when true).
+  -- Dotfiles (names starting with ".") are *always* included in the tree.
+  -- Default false still filters gitignored entries early in the fs_scandir loop.
   -- The snapshot (via bsi.git.status runner + Project) is *always* collected now so
   -- that hiding uses the full optimizations: early filter before node creation (#1),
   -- path_ignored short-circuit + negative toplevel cache (#2), parent_ignored prop (#4),
@@ -345,7 +346,7 @@ end
 local Provider = {}
 Provider.__index = Provider
 
-local DEFAULT_IGNORE = { "node_modules$", "%.git$", "^vendor$", "^dist$", "^build$", "^target$" }
+local DEFAULT_IGNORE = { "node_modules$", "^vendor$", "^dist$", "^build$", "^target$" }
 
 --- Creates a new Provider instance for scanning the filesystem
 function Provider.new() return setmetatable({}, Provider) end
@@ -568,20 +569,21 @@ function Provider:_should_skip(fullpath, name, opts)
   opts = opts or {}
   local show_ignored = opts.show_ignored == true
 
+  -- .git is always excluded (never useful to show, and expensive to traverse).
+  if name == ".git" then
+    return true
+  end
+
   if not show_ignored then
-    -- Apply hardcoded ignores (including .git) only when not showing ignored
+    -- Apply other hardcoded ignores only when not showing ignored.
+    -- Dotfiles (names starting with ".") are always included (except .git above).
     for _, pattern in ipairs(DEFAULT_IGNORE) do
       if name:match(pattern) then
         return true
       end
     end
 
-    -- Hidden files/directories (dotfiles)
-    if name:match("^%.") then
-      return true
-    end
-
-    -- Git ignored
+    -- Git ignored (controlled by show_ignored toggle)
     if self:_is_git_ignored(fullpath) then
       return true
     end
@@ -593,7 +595,7 @@ end
 --- Checks if a path is ignored according to .gitignore (cached).
 --- When the gitignore feature is disabled (show_ignored=false by default), this
 --- short-circuits and never does git work — only the cheap DEFAULT_IGNORE name
---- patterns + dotfiles are filtered.
+--- patterns are filtered. Dotfiles are always added.
 function Provider:_is_git_ignored(fullpath)
   self._ignored_cache = self._ignored_cache or {}
 
@@ -986,6 +988,7 @@ function Tree.new(opts)
   self.provider._ignored_dir_prefixes = nil
   self._git_fetch_pending = 0
   self._git_fetch_started = false
+  self._refreshing = false
 
   -- Bounded initial scan for performance: only populate direct children of root by default.
   -- Deeper directories are created as stubs (_unpopulated=true or _shallow_ignored).
@@ -1001,8 +1004,8 @@ function Tree.new(opts)
   }
 
   -- Quick *synchronous* fs directory read (provider:scan) for instant visible tree.
-  -- Only cheap name-based filters (DEFAULT_IGNORE + ^%. dots) for now.
-  -- Full git state (ignored pruning, git_status, numstat, dir summaries) is calculated
+  -- Cheap name-based filters (DEFAULT_IGNORE + unconditional .git) only.
+  -- Dotfiles are always included. Full git state (ignored pruning, etc.) is calculated
   -- asynchronously in the background fetches; when ready we re-scan with the data
   -- and re-render. This matches the request: directory listing fast+sync, git in bg.
   local quick_opts = vim.tbl_extend("force", self._initial_scan_opts, {
@@ -1040,7 +1043,8 @@ end
 
 --- Kick off the async git data fetches (changes + numstats + ignored snapshot/Project).
 --- The snapshot is always fetched so filtering in scan() is accurate and cheap.
---- show_ignored only decides whether gitignored nodes are created or omitted+counted as hidden.
+--- show_ignored only decides whether gitignored nodes are created or omitted (shown gray).
+--- Dotfiles are always added regardless of this flag.
 --- Uses bsi.cmd (vim.system) + the bsi.git.status runner for the ignored part.
 function Tree:_start_async_git_fetch()
   if self._git_fetch_started then return end
@@ -1052,6 +1056,7 @@ function Tree:_start_async_git_fetch()
   -- The `show_ignored` flag only controls *application* of the git_ignored filter:
   --   false (default) = skip creation of gitignored nodes (hide them)
   --   true  = create them (but marked git_ignored for gray rendering + shallow population)
+  -- Dotfiles are always created (never filtered by show_ignored).
   -- The expensive per-path check-ignore is avoided; we use one-shot snapshot + prefix + parent propagation.
   self._git_fetch_pending = 3
 
@@ -1447,6 +1452,7 @@ end
 function Tree:_complete_initial_scan()
   local is_refresh = self._pending_refresh_restore ~= nil
   local restore_info = self._pending_refresh_restore
+  local was_refresh = is_refresh
   self._pending_refresh_restore = nil
 
   local new_root = nil
@@ -1550,6 +1556,9 @@ function Tree:_complete_initial_scan()
     if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
       self:render()
     end
+
+    self._refreshing = false
+    self:_update_winbar()
     return
   end
 
@@ -1589,6 +1598,11 @@ function Tree:_complete_initial_scan()
   local opened_path = M.get_opened_file()
   if opened_path ~= "" then
     self:find_file(opened_path)
+  end
+
+  if was_refresh then
+    self._refreshing = false
+    self:_update_winbar()
   end
 end
 
@@ -1640,6 +1654,7 @@ end
 --- Apply git data (changes, numstats, ignored snapshot) to the *existing* node tree.
 --- No new filesystem scan. Used after async git data arrives to avoid redundant full scans.
 --- Also recomputes directory git summaries. Prunes git-ignored nodes when show_ignored=false.
+--- Dotfiles are never pruned (they are always present in the tree).
 function Tree:_apply_git_data_to_current_tree()
   if not self.state or not self.state.root then return end
   local changes = self._git_changes or {}
@@ -1877,7 +1892,7 @@ function Tree:open()
   })
 
   map("R", function() self:refresh() end, "Refresh")
-  map("h", function() self:toggle_show_ignored() end, "Toggle hidden & git-ignored files/dirs")
+  map("h", function() self:toggle_show_ignored() end, "Toggle git-ignored files/dirs (dotfiles are always shown)")
   map("q", "<cmd>close<cr>", "Close")
   map("<CR>", function() self:toggle() end, "Toggle / Expand directory")
   map("o", function() self:_open_system() end, "Open with system default app (Finder/Preview/etc)")
@@ -1916,7 +1931,9 @@ end
 
 --- Re-scans the filesystem and updates the tree state while attempting to preserve current expansion
 function Tree:refresh()
-  -- Capture expansion state before we blow away the tree (same as before)
+  -- Capture expansion state *before* starting new collection.
+  -- We deliberately keep the current tree data (nodes, expansions, old git decorations)
+  -- visible while the fresh fs scan + git status + numstat are collected in the background.
   local expanded = {}
   local full_ignored_paths = {}
   local function collect(node)
@@ -1935,41 +1952,36 @@ function Tree:refresh()
     expand_all = self.opts and self.opts.expand_all,
   }
 
-  -- Clear caches
+  -- Clear only per-collection scratch caches. Do *not* nuke the live tree state
+  -- or the current git data maps — we want the user to continue seeing the tree
+  -- (with its current structure and decorations) until the new data is ready.
   if self.provider then
     self.provider._ignored_cache = {}
     self.provider._git_root = nil
     self.provider._ignored_snapshot = nil
     self.provider._ignored_dir_prefixes = nil
   end
-  self._git_changes = nil
-  self._git_numstats = nil
+  -- Intentionally do *not* do:
+  --   self._git_changes = nil
+  --   self._git_numstats = nil
+  --   self.state = { empty root }
+  -- This is the "rerender without cleaning all data before we collect new" behavior.
 
-  -- Show a lightweight placeholder while we re-fetch (keeps the window responsive)
-  self.state = {
-    root = {
-      id = self.root_path,
-      name = vim.fn.fnamemodify(self.root_path, ":t"),
-      path = self.root_path,
-      type = "root",
-      depth = 0,
-      expanded = true,
-      children = {},
-    },
-  }
-  self._visible_dirty = true
-  if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
-    self:render()
+  self._refreshing = true
+  if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    self:_update_winbar()
   end
+  -- Do not render() here with placeholder content. The existing buffer lines stay.
 
-  -- Re-fetch asynchronously. We always request the full set (changes + numstats + ignored snapshot)
-  -- for correct filtering. show_ignored only affects node creation in the subsequent scan.
+  -- Kick off async collection. When all three finish, _complete_initial_scan
+  -- will build the fresh root (full scan for refresh) + restore expansion and swap it in.
   self._git_fetch_started = false
   self._git_fetch_pending = 3
   self:_start_async_git_fetch()
 end
 
---- Toggles visibility of hidden (dot) files and git-ignored files/directories.
+--- Toggles visibility of git-ignored files and directories.
+--- Dotfiles (e.g. .github/, .env*) are always shown.
 --- The git data (snapshot/Project) is collected unconditionally for correct filtering.
 --- This flag only changes whether gitignored paths are skipped at scan time or included (grayed, shallow).
 function Tree:toggle_show_ignored()
@@ -1994,6 +2006,9 @@ function Tree:_update_winbar()
   local title = self:get_root_path()
   if self.opts and self.opts.git_only then
     title = "Git: " .. title
+  end
+  if self._refreshing then
+    title = title .. " (refreshing...)"
   end
 
   vim.api.nvim_set_hl(0, "BSITreeTitle", { fg = "#3EFFDC", bold = true })
@@ -2679,7 +2694,7 @@ function M.setup(opts)
   vim.api.nvim_set_hl(0, "BSITreeGitAdded",    { fg = "#9ece6a", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitDeleted",  { fg = "#f7768e", bg = "NONE" })
-  vim.api.nvim_set_hl(0, "BSITreeGitIgnored",  { fg = "#5c6370", bg = "NONE" })  -- grey for git-ignored files/dirs when shown via show_ignored
+  vim.api.nvim_set_hl(0, "BSITreeGitIgnored",  { fg = "#5c6370", bg = "NONE" })  -- grey for git-ignored files/dirs (shown when toggle 'h' / show_ignored)
 
   -- Commands for the git status integration (from the detailed implementation plan)
   vim.api.nvim_create_user_command("BSIGitEnable", function()

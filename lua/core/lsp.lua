@@ -24,7 +24,7 @@ vim.lsp.enable({
     "lua-ls",
 
     -- php
-    "phpactor",
+    "phpactor",  -- phpactor (preferred for PHP repos with composer.json)
 
     -- java
     "jdtls",

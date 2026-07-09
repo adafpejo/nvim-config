@@ -68,8 +68,9 @@ These are synthesized by the Provider during aggregation:
 
 ### 1. Filesystem Scanning
 - Recursive `vim.loop.fs_scandir` + `fs_lstat` (with bounded initial depth for interactive trees and on-demand expansion for subdirs)
-- Hard-coded name-based ignore list (fast path, no git): `node_modules`, `.git`, `vendor`, `dist`, `build`, `target`
-- Gitignore (`.gitignore` rules) for gray rendering (`BSITreeGitIgnored`) and skip decisions when `show_ignored=false` is determined via a **single** `git status --porcelain=v1 -z --ignored=matching` snapshot per root (plus parent propagation and Lua prefix checks). Per-path `git check-ignore` is a legacy fallback only. This replaced the O(N) process spawns that caused the post-gray-rendering perf collapse on large ignored trees.
+- Hard-coded name-based ignore list (fast path, no git): `node_modules`, `vendor`, `dist`, `build`, `target` (plus `.git` is *always* excluded)
+- **Dotfiles** (names starting with `.` such as `.github/`, `.env*`, etc.) are **always** included.
+- Gitignore (`.gitignore` rules) controls gray rendering (`BSITreeGitIgnored`) and filtering of ignored entries when `show_ignored=false`, via a **single** `git status --porcelain=v1 -z --ignored=matching` snapshot per root (plus parent propagation and Lua prefix checks). Per-path `git check-ignore` is a legacy fallback only. This replaced the O(N) process spawns that caused the post-gray-rendering perf collapse on large ignored trees.
 - Deleted files that still appear in `git status --porcelain` are synthesized into the tree even if they no longer exist on disk
 - Initial open of the main tree only materializes a shallow view (root direct children + ancestors of the current editing buffer). Everything else is populated lazily when toggled or targeted by find/navigate.
 
@@ -114,7 +115,7 @@ These are synthesized by the Provider during aggregation:
 
 ### 8. Lazy Loading & Bounded Initial Scans (Performance)
 - Initial tree construction for interactive views (not `git_only`) uses a bounded scan (`max_depth` at root) so the whole FS and huge subtrees are not walked on `<leader>ee` / u1 etc. Only direct children of the root are populated at open time.
-- The single tracked "opened buffer" (the file the user is actively editing) seeds the view: `find_file` (called from BufEnter sync guard + explicitly after open) expands only the ancestor chain to the current file using targeted on-demand `Provider:scan` for those specific directories.
+- The single tracked "opened buffer" (the file the user is actively editing) seeds the view: `find_file` (called from BufEnter sync guard + explicitly after open) expands the ancestor chain to the current file using targeted on-demand `Provider:scan`. Because dotfiles are always present, this works for files inside hidden directories (e.g. opened via Telescope from `.github/`, `.config/`, etc.).
 - When you toggle a directory whose children have never been scanned (`children == {}`, `_unpopulated`, or `_shallow_ignored`), a targeted `Provider:scan` is performed using the cached `_git_changes` / `_git_numstats` from the parent Tree instance.
 - Works in both normal mode and `git_only` mode.
 - Git-ignored directories (shown when `show_ignored`) use shallow population: only direct children are listed on open; their subdirectories stay as collapsed stubs. This keeps render/scan cost low for massive ignored trees (node_modules, vendor, dist, etc.). Subdirs are populated on-demand when the user explicitly toggles them. No blanket "expand all" under ignored dirs.
@@ -193,6 +194,7 @@ All are buffer-local and silent.
 | Key          | Action                              |
 |--------------|-------------------------------------|
 | `R`          | Refresh (re-scan + preserve expansion) |
+| `h`          | Toggle git-ignored items (dotfiles always visible) |
 | `q`          | Close window                        |
 | `<CR>`       | Toggle dir / open file (in editor)  |
 | `o`          | Open with system default app (Finder/Preview/etc) |

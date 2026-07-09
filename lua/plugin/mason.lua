@@ -10,10 +10,11 @@ local opts = {
         "css-lsp",                         -- CSS LSP
 
         "rust-analyzer",                   -- Rust LSP
-        "intelephense",                    -- PHP LSP
         "tailwindcss-language-server",     -- Tailwind CSS LSP
 
-        "phpactor",                        -- PHP LSP
+        -- PHP LSP (phpactor preferred over intelephense for most projects)
+        "phpactor",
+        -- "intelephense",                 -- Alternative PHP LSP (uncomment if needed)
 
         -- Formatters (for conform.nvim and general use)
         "stylua",
