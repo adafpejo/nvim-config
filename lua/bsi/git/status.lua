@@ -775,6 +775,115 @@ function M.is_git_ignored(node_or_status)
 end
 
 -- ---------------------------------------------------------------------------
+-- Directory status synthesis (centralized from tree.lua duplication)
+-- Used by BSI Tree (and potentially other consumers) to label directories
+-- that contain mixed changes with DIR_* markers and the canonical [DMA] summary.
+-- ---------------------------------------------------------------------------
+
+--- Compute DIR_* status and git_status_summary for a directory given its children's
+--- git_status values (strings like "M ", "??", "DIR_...", or raw porcelain XY).
+--- Optionally pass child_summaries (array of "DMA" strings) to fold them in.
+---
+--- Returns { git_status = "DIR_..."|nil, git_status_summary = "DMA"|nil }
+---@param child_statuses string[]
+---@param child_summaries? string[]
+---@return { git_status?: string, git_status_summary?: string }
+function M.compute_dir_git_status(child_statuses, child_summaries)
+  child_statuses = child_statuses or {}
+  child_summaries = child_summaries or {}
+  if #child_statuses == 0 and #child_summaries == 0 then
+    return {}
+  end
+
+  local all_staged, some_staged, some_unstaged, all_untracked = true, false, false, true
+
+  for _, s in ipairs(child_statuses) do
+    if s then
+      if s == "DIR_ADDED" then
+        some_staged = true; all_untracked = false
+      elseif s == "DIR_PARTIAL" then
+        some_unstaged = true; all_staged = false; all_untracked = false
+      elseif s == "DIR_UNTRACKED" then
+        some_unstaged = true; all_staged = false
+      else
+        local staged = s:sub(1, 1)
+        local unstaged = s:sub(2, 2)
+        if staged ~= "?" then all_untracked = false end
+        if staged ~= " " and staged ~= "?" then some_staged = true end
+        if unstaged ~= " " or staged == "?" then some_unstaged = true; all_staged = false end
+      end
+    else
+      all_staged = false
+      all_untracked = false
+    end
+  end
+
+  local dir_gs = nil
+  if all_untracked and some_unstaged then
+    dir_gs = "DIR_UNTRACKED"
+  elseif all_staged and some_staged then
+    dir_gs = "DIR_ADDED"
+  elseif some_staged or some_unstaged then
+    local statuses, chars = {}, {}
+    local function add_status(s)
+      if not s then return end
+      if s == "DIR_ADDED" then s = "A"
+      elseif s == "DIR_PARTIAL" then s = "M"
+      elseif s == "DIR_UNTRACKED" then s = "?"
+      end
+      for j = 1, #s do
+        local ch = s:sub(j, j)
+        if ch ~= " " and not statuses[ch] then
+          statuses[ch] = true
+          table.insert(chars, ch)
+        end
+      end
+    end
+    for _, s in ipairs(child_statuses) do add_status(s) end
+    table.sort(chars)
+    if #chars > 0 then dir_gs = "DIR_MULTI:" .. table.concat(chars, "") end
+  end
+
+  -- Canonical summary "DMA" (D then M then A)
+  local has = { A = false, M = false, D = false }
+  local function mark(s)
+    if not s then return end
+    if s == "DIR_ADDED" or s == "DIR_UNTRACKED" then has.A = true; return end
+    if s == "DIR_PARTIAL" then has.A = true; has.M = true; return end
+    if type(s) == "string" and s:sub(1, 10) == "DIR_MULTI:" then
+      local rest = s:sub(11)
+      if rest:match("A") or rest:match("%?") then has.A = true end
+      if rest:match("[MRC]") then has.M = true end
+      if rest:match("D") then has.D = true end
+      return
+    end
+    if s:match("A") or s:match("%?") then has.A = true end
+    if s:match("[MRC]") then has.M = true end
+    if s:match("D") then has.D = true end
+  end
+  for _, s in ipairs(child_statuses) do
+    mark(s)
+  end
+  for _, sm in ipairs(child_summaries) do
+    if sm then
+      if sm:match("A") then has.A = true end
+      if sm:match("M") then has.M = true end
+      if sm:match("D") then has.D = true end
+    end
+  end
+
+  local summary = ""
+  if has.D then summary = summary .. "D" end
+  if has.M then summary = summary .. "M" end
+  if has.A then summary = summary .. "A" end
+
+  local res = {}
+  if dir_gs then res.git_status = dir_gs end
+  if #summary > 0 then res.git_status_summary = summary end
+  return res
+end
+
+-- ---------------------------------------------------------------------------
 -- Public surface (will grow with Phase 7)
 -- ---------------------------------------------------------------------------
 

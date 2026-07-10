@@ -68,9 +68,10 @@ These are synthesized by the Provider during aggregation:
 
 ### 1. Filesystem Scanning
 - Recursive `vim.loop.fs_scandir` + `fs_lstat` (with bounded initial depth for interactive trees and on-demand expansion for subdirs)
-- Hard-coded name-based ignore list (fast path, no git): `node_modules`, `vendor`, `dist`, `build`, `target` (plus `.git` is *always* excluded)
+- Hard-coded name-based ignore list (fast path, no git): `node_modules`, `vendor`, `dist`, `build`, `target`
 - **Dotfiles** (names starting with `.` such as `.github/`, `.env*`, etc.) are **always** included.
-- Gitignore (`.gitignore` rules) controls gray rendering (`BSITreeGitIgnored`) and filtering of ignored entries when `show_ignored=false`, via a **single** `git status --porcelain=v1 -z --ignored=matching` snapshot per root (plus parent propagation and Lua prefix checks). Per-path `git check-ignore` is a legacy fallback only. This replaced the O(N) process spawns that caused the post-gray-rendering perf collapse on large ignored trees.
+- `.git` is treated as git-ignored: hidden by default in the filter, but shown (in grey) when `show_ignored=true`. Deep contents are kept shallow for performance.
+- Gitignore (`.gitignore` rules) controls gray rendering (`BSITreeGitIgnored`) and filtering of ignored entries. `show_ignored` (default `true`) controls whether they are shown (greyed) or hidden. Uses a **single** `git status --porcelain=v1 -z --ignored=matching` snapshot per root (plus parent propagation and Lua prefix checks). Per-path `git check-ignore` is a legacy fallback only. This replaced the O(N) process spawns that caused the post-gray-rendering perf collapse on large ignored trees.
 - Deleted files that still appear in `git status --porcelain` are synthesized into the tree even if they no longer exist on disk
 - Initial open of the main tree only materializes a shallow view (root direct children + ancestors of the current editing buffer). Everything else is populated lazily when toggled or targeted by find/navigate.
 
@@ -82,7 +83,10 @@ These are synthesized by the Provider during aggregation:
 
 ### 3. Git Line Changes (`+N-M`)
 - Collected via `git diff --numstat` + `git diff --cached --numstat` (staged + unstaged merged)
-- Displayed **after the filename** for every file that has non-zero changes: ` +34-12`
+- Displayed **after the filename** for every file that has non-zero changes:
+  - mixed: ` +3-4`
+  - pure add: ` +7`
+  - pure delete (removal): ` -12`
 - Only shown when `added > 0 or deleted > 0`
 - Binary files and files with no diff stats are omitted
 
@@ -93,11 +97,14 @@ These are synthesized by the Provider during aggregation:
 
 ### 5. Coloring Rules (current)
 - **Files** — no single-character git status is rendered at the end of file lines anymore.
-  - The inline ` +N-M` detail (right after the filename) is **always split-colored**:
-    - `+NN` portion → green (`BSITreeGitAdded`)
-    - `-MM` portion → red (`BSITreeGitDeleted`)
-  - Example: `TODO.md +34-23` renders `+34` in green and `-23` in red.
-  - This split applies to pure additions (`+120-0`), pure deletions (`+0-45`), and real modifications alike.
+  - The inline detail (right after the filename) is colored:
+    - `+NN` (or `+NN` part of `+NN-MM`) → green (`BSITreeGitAdded`)
+    - `-MM` (or whole ` -MM` for pure removal) → red (`BSITreeGitDeleted`)
+  - Examples:
+    - `TODO.md +34-23` → `+34` green, `-23` red
+    - `deleted.txt -12` → entire `-12` in red (`BSITreeGitDeleted`)
+    - `new.txt +5` → `+5` green
+  - Pure removals use a leading `-N` (no spurious `+0`) and render fully in the deletion color.
 - **Directories with git changes**: both the directory name and the `[DMA]` (or `[AM]`, `[D]`, etc.) postfix are colored purple (`Special`).
 - The filename text itself still receives a `name_hl` based on git status (`DiagnosticOk`/`Warn`/`Error`) for quick visual scanning.
 
@@ -115,6 +122,7 @@ These are synthesized by the Provider during aggregation:
 
 ### 8. Lazy Loading & Bounded Initial Scans (Performance)
 - Initial tree construction for interactive views (not `git_only`) uses a bounded scan (`max_depth` at root) so the whole FS and huge subtrees are not walked on `<leader>ee` / u1 etc. Only direct children of the root are populated at open time.
+- Git mode (`git_only`) uses a git-pruned scan (leveraging the porcelain status map + ancestor "dir" markers) when the git data is ready or on toggle. This scans exactly the files/dirs needed to show changes and builds the full default directory hierarchy (intermediate folders) for them. No artificial depth limit for the git-relevant structure.
 - The single tracked "opened buffer" (the file the user is actively editing) seeds the view: `find_file` (called from BufEnter sync guard + explicitly after open) expands the ancestor chain to the current file using targeted on-demand `Provider:scan`. Because dotfiles are always present, this works for files inside hidden directories (e.g. opened via Telescope from `.github/`, `.config/`, etc.).
 - When you toggle a directory whose children have never been scanned (`children == {}`, `_unpopulated`, or `_shallow_ignored`), a targeted `Provider:scan` is performed using the cached `_git_changes` / `_git_numstats` from the parent Tree instance.
 - Works in both normal mode and `git_only` mode.
@@ -122,9 +130,10 @@ These are synthesized by the Provider during aggregation:
 - Gitignore decisions are driven by a **one-shot snapshot** (`git status --porcelain=v1 -z --ignored=matching`) taken once per Tree root/refresh. The old per-path `git check-ignore` is only a fallback. Combined with `under_ignored` propagation and exact/prefix Lua checks, the cost of "is this gray/should we skip?" is now ~1 process + fast table lookups instead of one process per file. This is the main fix for the post-gray-rendering perf regression on large repos. (Modeled on nvim-tree's GitRunner + parent_ignored + disable_for_dirs patterns.)
 
 ### 9. Git-Only Mode (`git_only = true`)
-- Used by layout "2" (`<leader>u2`)
+- Used by layout "2" (`<leader>u2`) and `<leader>ge`
 - Any path that does **not** appear in the git status map is pruned from the tree
-- Only directories and files that have changes (or contain changes) are shown
+- Renders using the normal directory tree structure (with folders) containing only changed items and the directories leading to them.
+- On entering the mode (or initial open in git mode) a git-pruned scan is performed so *all* changed files are present in their natural dir hierarchy (including removed files synthesized from status). Toggle with `g` inside the tree also (re)scans for structure.
 
 ### 10. Current File Tracking
 - On `BufEnter` to a *real file buffer*, if the path differs from last synced, every live tree instance calls `find_file()` (guarded to avoid redundant work on help/quickfix/terminals/tree-buf etc.)
@@ -194,7 +203,7 @@ All are buffer-local and silent.
 | Key          | Action                              |
 |--------------|-------------------------------------|
 | `R`          | Refresh (re-scan + preserve expansion) |
-| `h`          | Toggle git-ignored items (dotfiles always visible) |
+| `h`          | Toggle visibility of git-ignored items (including .git; dotfiles always visible; shown in grey) |
 | `q`          | Close window                        |
 | `<CR>`       | Toggle dir / open file (in editor)  |
 | `o`          | Open with system default app (Finder/Preview/etc) |
@@ -242,7 +251,7 @@ The tree defines these custom highlight groups (set in `M.setup()`):
 - `BSITreeCurrentFile`
 - `BSITreeGitAdded` (green) — used for the `+NN` part of file deltas
 - `BSITreeGitModified` (orange) — available for filename highlighting on modifications
-- `BSITreeGitDeleted` (red) — used for the `-MM` part of file deltas
+- `BSITreeGitDeleted` (red) — used for the `-MM` part of file deltas and full stats on removed files
 - `BSITreeGitIgnored` (grey) — used for git-ignored files/dirs when shown
 - `BSITreeGitIgnored` (grey) — used for files and directories that match .gitignore (when `show_ignored=true`)
 
@@ -252,26 +261,29 @@ It also uses `"Special"` (purple) for directories that contain any git changes (
 
 ## Limitations & Known Behaviors
 
-- Git operations (`status`, `diff --numstat`, the ignore snapshot) are currently **synchronous** (`io.popen`). Large repositories can still cause some lag on first open or `R` (but far less than before: one or two processes for the whole project instead of one per file for the ignore checks). The snapshot + bounded scan + lazy subdir population keep perceived cost low even when huge ignored trees are present.
-- The fixed status column (`status_col = 34`) is a heuristic; very long filenames + git detail can push the single-char prefix far to the right.
-- `print()` is still used for yank feedback (should be `vim.notify`).
+- Git data collection is now **asynchronous** (`vim.system` via `bsi.cmd` + `GitRunner` in `bsi.git.status`). The initial tree renders instantly from a cheap bounded FS scan; git status/numstat/ignored data is attached in the background. Large repos still pay for 1–2 git processes (the centralized porcelain=v1 -z snapshot), not one-per-file.
+- Default `show_ignored=true`: gitignored items (including the `.git` directory and its top-level contents) are shown by default, rendered using `BSITreeGitIgnored` (grey). `.git` is never deeply traversed.
+- The old fixed status column heuristic and trailing single-char status for files have been removed (inline colored `+N-M` and per-letter directory summaries are used instead).
+- `print()` for yank feedback has been replaced with `vim.notify`.
 - No horizontal scrolling help; very deep trees or extremely long names can become hard to read.
 - The module assumes a Unix-like environment (forward slashes, `git` in PATH).
-- Cursor movement inside the tree uses native `cursorline` + `winhighlight` (no render cost). Full re-render (visible walk + buf_set_lines + highlights) only happens on structural changes (toggle/expand/find/refresh) or when the tracked opened file changes.
+- Cursor movement inside the tree uses native `cursorline` + `winhighlight` (no render cost). Full re-render only on structural changes or tracked file change.
 - `BSITreeOpenedFile` highlight group exists but does nothing (the feature was commented out).
 - Multiple simultaneous trees on different roots are supported via `M.instances`, but only the most recently focused one receives `BufEnter` auto-follow in some edge cases.
+- Legacy per-path `git check-ignore` and the old sync `Provider` git getters have been removed. Gitignore decisions rely on the one-shot snapshot + prefix + Project parent propagation.
+- Directory change synthesis (DIR_* / DMA summaries) is now centralized in `bsi.git.status.compute_dir_git_status`.
 
 ---
 
 ## Future / Wishlist (not implemented)
 
-- Async git data collection (`vim.system`)
 - Right-aligned git detail column that respects actual window width
 - Configurable ignore patterns
 - LSP diagnostic counts next to files
 - Better handling of submodules and worktrees
-- Replace `print` with `vim.notify`
+- Full watcher-driven live refresh of open trees without pressing R (basic Project watchers exist; tree notification wiring is partial)
+- More complete use of Project.dirs aggregation inside the tree (currently tree still maintains some parallel change maps)
 
 ---
 
-*Document generated from the live implementation as of the latest edits (trailing single-char status removed for files + `+NN` always green / `-MM` always red split on file deltas + purple directories for any git changes).*
+*Document updated during bsi-tree analysis + remediation (2026-07). Key fixes: dead legacy code removed, check-ignore eliminated, synthesis centralized in bsi.git.status, yank uses notify, git collection is async, snapshot+Project is the source of truth for ignored.*
