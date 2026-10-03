@@ -65,7 +65,6 @@ local ensureInstalled = {
     "hurl",
     "ini",
     "jinja",
-    "java",
     "javascript",
     "jsdoc",
     "json",
@@ -97,6 +96,14 @@ local ensureInstalled = {
     "yaml",
     "zig"
 }
+
+local languages = require("languages")
+if languages.java then
+    table.insert(ensureInstalled, "java")
+    if languages.groovy then
+        table.insert(ensureInstalled, "groovy")
+    end
+end
 
 vim.api.nvim_create_autocmd('FileType', {
     callback = function()

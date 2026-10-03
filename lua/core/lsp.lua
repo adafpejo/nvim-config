@@ -1,8 +1,12 @@
+local languages = require("languages")
+
 vim.schedule(function()
-  vim.lsp.config('jdtls', require('core.jdtls'))  -- your lsp/jdtls.lua as a module
+  if languages.java then
+    vim.lsp.config('jdtls', require('core.jdtls'))
+  end
 end)
 vim.lsp.log.set_level("debug")
-vim.lsp.enable({
+local servers = {
     "yamlls",
     -- "json"
     "jsonls",
@@ -26,14 +30,19 @@ vim.lsp.enable({
     -- php
     "phpactor",  -- phpactor (preferred for PHP repos with composer.json)
 
-    -- java
-    "jdtls",
     -- "kotlin-language-server",
-    "groovyls",
 
     "pyright",
     "xcrun",
-})
+}
+
+-- Java LSP. Toggle in lua/languages.local.lua.
+-- groovyls is enabled from lua/plugin/mason.lua on the first Groovy buffer.
+if languages.java then
+    table.insert(servers, "jdtls")
+end
+
+vim.lsp.enable(servers)
 vim.lsp.config('yamlls', {
     settings = {
         yaml = {

@@ -1,4 +1,5 @@
 -- Mason verification utility
+local languages = require("languages")
 local M = {}
 
 -- Check if a tool is managed by Mason
@@ -28,8 +29,6 @@ function M.verify_tools()
         "astro-ls",
         "typescript-language-server", "phpactor", "zls",
 
-        -- java
-        "jdtls",
         "kotlin_language_server",
 
         -- Formatters (Mason-managed)
@@ -38,6 +37,13 @@ function M.verify_tools()
         -- Linters (Mason-managed)
         "golangci-lint", "eslint_d", "luacheck", "shellcheck"
     }
+
+    if languages.java then
+        table.insert(mason_tools, "jdtls")
+        if languages.groovy then
+            table.insert(mason_tools, "groovy-language-server")
+        end
+    end
 
     local system_tools = {
         -- System tools (not managed by Mason)

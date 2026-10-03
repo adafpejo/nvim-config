@@ -8,3 +8,6 @@ foo.*
 data
 
 .DS_Store
+
+# Per-machine language switches. See lua/languages.lua.
+lua/languages.local.lua

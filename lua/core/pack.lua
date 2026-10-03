@@ -1,4 +1,5 @@
 local gh = function(x) return 'https://github.com/' .. x end
+local languages = require("languages")
 
 -- vim.pack has no build= hook. Compile sniprun locally on install/update
 -- (macOS cannot use the Linux prebuilt binary; cargo is required).
@@ -38,9 +39,6 @@ vim.pack.add({
     gh("nvim-treesitter/nvim-treesitter"),
     gh("nvim-treesitter/nvim-treesitter-textobjects"),
     gh("nvim-mini/mini.nvim"),
-
-    -- java
-    gh("mfussenegger/nvim-jdtls"),
 
     -- dap
     gh("mfussenegger/nvim-dap"),
@@ -108,7 +106,6 @@ vim.pack.add({
     gh("HiPhish/neotest-busted"),
     gh("thenbe/neotest-playwright"),
     gh("nvim-neotest/neotest-python"),
-    gh("rcasia/neotest-java"),
 
     -- adapters
     { src = gh("nvim-neotest/neotest-go"), version = "05535cb2cfe3ce5c960f65784896d40109572f89" }, -- https://github.com/nvim-neotest/neotest-go/issues/57
@@ -122,6 +119,14 @@ vim.pack.add({
     -- snippet runner (Rust binary; compiled via PackChanged + install.sh)
     gh("michaelb/sniprun"),
 })
+
+-- Java plugins. Toggle in lua/languages.local.lua.
+if languages.java then
+    vim.pack.add({
+        gh("mfussenegger/nvim-jdtls"),
+        gh("rcasia/neotest-java"),
+    })
+end
 
 -- setup
 require("plugin.mason")

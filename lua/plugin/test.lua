@@ -1,3 +1,5 @@
+local languages = require("languages")
+
 local opts = {
   adapters = {
     ["neotest-go"] = {
@@ -14,12 +16,15 @@ local opts = {
       end,
     },
     ["neotest-vitest"] = {},
-    ["neotest-java"] = {
-      filetypes = { "java", "kotlin" },
-      junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
-    },
   },
 }
+
+if languages.java then
+  opts.adapters["neotest-java"] = {
+    filetypes = { "java", "kotlin" },
+    junit_jar = "~/.config/tools/unit-platform-console-standalone-1.10.2.jar",
+  }
+end
 
 local neotest_ns = vim.api.nvim_create_namespace("neotest")
 vim.diagnostic.config({
