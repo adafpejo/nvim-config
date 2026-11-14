@@ -13,7 +13,7 @@ return {
         "typescriptreact",
         "typescript.tsx",
     },
-    root_markers = { "tsconfig.json", "jsconfig.json", "package.json", ".git" },
+    root_dir = require("core.lsp_root").typescript_root_dir,
     settings = {
         typescript = {
             -- Remove tsdk setting to allow auto-detection

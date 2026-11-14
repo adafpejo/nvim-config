@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide a filesystem-only file tree sidebar for the BSI Neovim UI. A bounded, ignore-aware directory scanner feeds a left-split listing that navigates, creates, moves, and deletes paths, shows gitignore and dirty-file decorations without a git-only mode, and stays interactive on large folders.
+Provide a filesystem-only file tree sidebar for the BSI Neovim UI. A bounded, ignore-aware directory scanner feeds a left-split listing that navigates, creates, moves, copies, and deletes paths, shows gitignore and dirty-file decorations without a git-only mode, and stays interactive on large folders.
 
 ## Requirements
 
@@ -595,7 +595,7 @@ Enter on a directory SHALL expand or collapse it. Expanding an unpopulated direc
 
 ### Requirement: Tree keys yank, open externally, diff, toggle ignored names, and close
 
-While the tree is focused: `y` SHALL yank the node name; `Y` SHALL yank the path relative to the tree root; `o` SHALL open the node with the system default application; `D` on a file SHALL open a git diff for that file; `h` SHALL toggle visibility of name-based ignored directories; `q` SHALL close the tree window. Add, rename-move, and delete SHALL use `a`, `r`/`u`, and `d` respectively.
+While the tree is focused, in normal mode: `Y` SHALL yank the path relative to the tree root; `o` SHALL open the node with the system default application; `D` on a file SHALL open a git diff for that file; `h` SHALL toggle visibility of name-based ignored directories, which SHALL be visible when the tree opens; `q` SHALL close the tree window. Add, rename-move, and delete SHALL use `a`, `r`/`u`, and `d` respectively. `y` copies the file itself, and `c` copies file contents, as specified below.
 
 #### Scenario: Yank relative path
 
@@ -615,6 +615,51 @@ While the tree is focused: `y` SHALL yank the node name; `Y` SHALL yank the path
 - **WHEN** the tree window is focused
 - **AND** the user presses `q`
 - **THEN** that tree window is closed
+
+### Requirement: y copies files for paste
+
+`Y` SHALL put the root-relative path on the clipboard registers immediately, so a following paste sees that text.
+
+`y` SHALL stage the file or directory under the cursor as a copy of that filesystem node. In visual mode, `y` SHALL stage each selected file or directory. `x` in normal mode SHALL stage the node under the cursor as a cut. Staging the same paths with the same action SHALL clear the stage. The root MUST NOT be staged. A selected path inside another selected directory MUST NOT be staged separately. Staged names SHALL use the copied or cut highlight.
+
+`p` SHALL paste every staged path into the directory under the cursor, or into the parent directory when the cursor is on a file. A copy SHALL duplicate the file or directory and leave the source in place. A cut SHALL move it and prune empty ancestors of the old path. An existing destination MUST NOT be overwritten; the user is prompted for another path. Pasting a directory into itself MUST NOT proceed.
+
+#### Scenario: Visual yank then paste
+
+- **WHEN** the user visually selects `a.txt` and `b.txt` and presses `y`
+- **AND** the user then presses `p` on directory `dest`
+- **THEN** `dest/a.txt` and `dest/b.txt` exist with the same contents
+- **AND** the original files still exist
+
+#### Scenario: Cut moves and prunes an empty parent
+
+- **WHEN** the user cuts `nested/a.txt` and pastes it on the tree root
+- **THEN** `a.txt` exists at the root
+- **AND** `nested/a.txt` does not exist
+- **AND** `nested` is removed when it no longer contains a file
+
+#### Scenario: Existing destination is kept
+
+- **WHEN** a copy would land on a path that already exists
+- **THEN** that existing file is unchanged
+- **AND** the user is asked for a different destination
+
+### Requirement: c copies file contents to the paste registers
+
+`c` on a file SHALL put that file’s contents on the paste registers and SHALL NOT open a window. `c` on a directory SHALL put the contents of the files directly inside it on the paste registers, each introduced by its name, and MUST NOT include files nested in subdirectories. In visual mode, `c` SHALL do the same for the selected nodes.
+
+#### Scenario: Copy one file’s contents
+
+- **WHEN** the cursor is on `note.txt` and the user presses `c`
+- **THEN** the paste registers hold the contents of `note.txt`
+- **AND** no new window is opened
+
+#### Scenario: Copy a directory’s contents
+
+- **WHEN** the cursor is on a directory that contains `a.txt` and `sub/hidden.txt`
+- **AND** the user presses `c`
+- **THEN** the paste registers include the contents of `a.txt`
+- **AND** they do not include the contents of `sub/hidden.txt`
 
 ### Requirement: Users can rename or move the node under the cursor
 

@@ -20,6 +20,20 @@ vim.keymap.set("n", "<leader>hp", ":lua require('harpoon.ui').nav_prev()<CR>", {
 vim.keymap.set("n", "<leader>ht", ":lua require('harpoon.term').gotoTerminal(1)<CR>", { desc = "Terminal", noremap = true })
 
 -- gitsigns
+vim.keymap.set('n', ']c', function()
+    if vim.wo.diff then
+        vim.cmd.normal({ ']c', bang = true })
+    else
+        gitsigns.nav_hunk('next')
+    end
+end, { desc = 'Next hunk' })
+vim.keymap.set('n', '[c', function()
+    if vim.wo.diff then
+        vim.cmd.normal({ '[c', bang = true })
+    else
+        gitsigns.nav_hunk('prev')
+    end
+end, { desc = 'Previous hunk' })
 vim.keymap.set('n', '<leader>hs', gitsigns.stage_hunk)
 vim.keymap.set('n', '<leader>hr', gitsigns.reset_hunk)
 vim.keymap.set('v', '<leader>hs', function() gitsigns.stage_hunk { vim.fn.line('.'), vim.fn.line('v') } end)

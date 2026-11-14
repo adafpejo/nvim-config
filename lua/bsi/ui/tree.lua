@@ -20,12 +20,16 @@ M.the_tree = nil
 -- Used for current-file highlighting and find_file syncing.
 M.opened_buffer = nil
 
+-- Files staged for paste. Visual-mode `y` copies; `x` cuts. `paths` are normalized.
+---@type { action: "copy"|"cut", paths: string[] }|nil
+M.file_clip = nil
+
 --- Default configuration for the tree
 M.config = {
   -- When false, name-based heavy dirs (node_modules, vendor, …) and .git are hidden.
   -- Dotfiles (names starting with ".") are always included except .git when hidden.
-  -- Toggle with 'h' inside the tree.
-  show_ignored = false,
+  -- Toggle with 'h' inside the tree. Shown on open.
+  show_ignored = true,
   -- Auto window width (columns) from the longest visible row, clamped here.
   width_min = 30,
   width_max = 100,
@@ -67,6 +71,7 @@ end
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 local Provider = require("bsi.fs.provider")
 local create_fs = require("bsi.fs.create")
+local copy_fs = require("bsi.fs.copy")
 local prune_fs = require("bsi.fs.prune")
 local system = require("bsi.system")
 local git_ignore = require("bsi.git.ignore")
@@ -258,6 +263,27 @@ function Renderer:build(nodes)
             })
           end
         end
+      end
+    end
+
+    local clip = M.file_clip
+    if clip and clip.paths and node.path and node.type ~= "root" then
+      local node_path = node.path
+      local normalized = vim.fs.normalize(node_path):gsub("/$", "")
+      local matched = false
+      for _, clip_path in ipairs(clip.paths) do
+        if node_path == clip_path or normalized == clip_path then
+          matched = true
+          break
+        end
+      end
+      if matched then
+        table.insert(highlights, {
+          hl = clip.action == "cut" and "BSITreeCut" or "BSITreeCopied",
+          line = i - 1,
+          col_start = name_start,
+          col_end = name_end,
+        })
       end
     end
   end
@@ -680,11 +706,26 @@ function Tree:open()
     self:rename_or_move()
   end, "Rename / Move")
   map("y", function()
-    self:_yank(false)
-  end, "Yank name")
+    self:_stage_cursor("copy")
+  end, "Copy file")
   map("Y", function()
     self:_yank(true)
   end, "Yank relative path")
+  map("c", function()
+    self:copy_contents(self:_cursor_node())
+  end, "Copy file contents")
+  map("x", function()
+    self:_stage_cursor("cut")
+  end, "Cut file for paste")
+  map("p", function()
+    self:_paste_cursor()
+  end, "Paste files")
+  vim.keymap.set("x", "y", function()
+    self:_copy_visual()
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Copy selection for paste" })
+  vim.keymap.set("x", "c", function()
+    self:_copy_visual_contents()
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Copy selection contents" })
   map("<LeftMouse>", "<LeftMouse>", "Select node")
   map("<2-LeftMouse>", function()
     self:toggle()
@@ -1004,6 +1045,551 @@ function Tree:_delete_node()
   end
 end
 
+local function normalize_path(p)
+  return vim.fs.normalize(p or ""):gsub("/$", "")
+end
+
+--- Point loaded buffers that lived under `src` at the moved path.
+---@param src string
+---@param dst string
+local function retarget_buffers(src, dst)
+  src = normalize_path(src)
+  dst = normalize_path(dst)
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      local name = vim.api.nvim_buf_get_name(bufnr)
+      if name ~= "" then
+        name = normalize_path(name)
+        local new_name
+        if name == src then
+          new_name = dst
+        elseif name:sub(1, #src + 1) == src .. "/" then
+          new_name = dst .. name:sub(#src + 1)
+        end
+        if new_name then
+          pcall(vim.api.nvim_buf_set_name, bufnr, new_name)
+        end
+      end
+    end
+  end
+end
+
+--- A free sibling path: `note.txt` -> `note-copy.txt`, then `note-copy2.txt`.
+---@param path string
+---@return string
+local function unique_paste_path(path)
+  path = normalize_path(path)
+  if not (vim.uv or vim.loop).fs_lstat(path) then
+    return path
+  end
+  local dir = vim.fn.fnamemodify(path, ":h")
+  local name = vim.fn.fnamemodify(path, ":t")
+  local stem, ext = name, ""
+  if not (name:sub(1, 1) == "." and not name:sub(2):find(".", 1, true)) then
+    local s, e = name:match("^(.*)(%.[^.]+)$")
+    if s and s ~= "" then
+      stem, ext = s, e
+    end
+  end
+  local n = 1
+  while true do
+    local suffix = n == 1 and "-copy" or ("-copy" .. n)
+    local candidate = dir .. "/" .. stem .. suffix .. ext
+    if not (vim.uv or vim.loop).fs_lstat(candidate) then
+      return candidate
+    end
+    n = n + 1
+    if n > 1000 then
+      return candidate
+    end
+  end
+end
+
+function Tree:_redraw_clip()
+  self._visible_dirty = true
+  if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+    self:render()
+  end
+end
+
+---@return bsi.Node|nil
+function Tree:_cursor_node()
+  if not self.visible_nodes or #self.visible_nodes == 0 then
+    return nil
+  end
+  local win = 0
+  if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    win = self.winid
+  end
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  return self.visible_nodes[cursor[1]]
+end
+
+---@param node bsi.Node|nil
+---@return string|nil
+function Tree:_paste_dir(node)
+  if not node or not node.path then
+    return nil
+  end
+  if node.type == "directory" or node.type == "root" then
+    return normalize_path(node.path)
+  end
+  return normalize_path(vim.fn.fnamemodify(node.path, ":h"))
+end
+
+---@param a string[]
+---@param b string[]
+---@return boolean
+local function same_paths(a, b)
+  if #a ~= #b then
+    return false
+  end
+  local sa, sb = vim.deepcopy(a), vim.deepcopy(b)
+  table.sort(sa)
+  table.sort(sb)
+  for i = 1, #sa do
+    if sa[i] ~= sb[i] then
+      return false
+    end
+  end
+  return true
+end
+
+--- Drop a path that sits inside another staged path. Keep selection order otherwise.
+---@param paths string[]
+---@return string[]
+local function prune_nested(paths)
+  local kept = {}
+  for _, path in ipairs(paths) do
+    local skip = false
+    local filtered = {}
+    for _, prev in ipairs(kept) do
+      if prev == path or (copy_fs.contains(prev, path) and prev ~= path) then
+        skip = true
+        filtered[#filtered + 1] = prev
+      elseif copy_fs.contains(path, prev) and path ~= prev then
+        -- prev is inside path; the parent replaces it
+      else
+        filtered[#filtered + 1] = prev
+      end
+    end
+    kept = filtered
+    if not skip then
+      kept[#kept + 1] = path
+    end
+  end
+  return kept
+end
+
+--- Stage nodes for paste. The same action and the same paths clear the stage.
+--- A single node or a list of nodes is accepted. The root is skipped.
+---@param node_or_nodes bsi.Node|bsi.Node[]|nil
+---@param action "copy"|"cut"
+function Tree:stage_clipboard(node_or_nodes, action)
+  if action ~= "copy" and action ~= "cut" then
+    return
+  end
+  local nodes = node_or_nodes
+  if nodes and nodes.path then
+    nodes = { nodes }
+  end
+  if type(nodes) ~= "table" then
+    return
+  end
+
+  local paths = {}
+  local saw = false
+  for _, node in ipairs(nodes) do
+    saw = true
+    if node and node.type ~= "root" and node.path then
+      paths[#paths + 1] = normalize_path(node.path)
+    end
+  end
+  if not saw then
+    return
+  end
+  if #paths == 0 then
+    vim.notify("Cannot copy or cut the root", vim.log.levels.WARN)
+    return
+  end
+  paths = prune_nested(paths)
+
+  local clip = M.file_clip
+  if clip and clip.action == action and clip.paths and same_paths(clip.paths, paths) then
+    M.file_clip = nil
+    vim.notify("Cleared clipboard", vim.log.levels.INFO)
+  else
+    M.file_clip = { action = action, paths = paths }
+    local verb = action == "cut" and "Cut " or "Yanked "
+    if #paths == 1 then
+      vim.notify(verb .. paths[1], vim.log.levels.INFO)
+    else
+      vim.notify(verb .. #paths .. " paths", vim.log.levels.INFO)
+    end
+  end
+  self:_redraw_clip()
+end
+
+---@param action "copy"|"cut"
+function Tree:_stage_cursor(action)
+  self:stage_clipboard(self:_cursor_node(), action)
+end
+
+--- Copy the visible rows from `line1` through `line2` (inclusive, 1-based).
+---@param line1 integer
+---@param line2 integer
+---@param action "copy"|"cut"|nil
+function Tree:copy_lines(line1, line2, action)
+  if not self.visible_nodes then
+    return
+  end
+  if line1 > line2 then
+    line1, line2 = line2, line1
+  end
+  local nodes = {}
+  for i = line1, line2 do
+    local node = self.visible_nodes[i]
+    if node then
+      nodes[#nodes + 1] = node
+    end
+  end
+  self:stage_clipboard(nodes, action or "copy")
+end
+
+function Tree:_visual_line_range()
+  local line1 = vim.fn.line("v")
+  local line2 = vim.fn.line(".")
+  if line1 < 1 or line2 < 1 then
+    line1 = vim.fn.line("'<")
+    line2 = vim.fn.line("'>")
+  end
+  return line1, line2
+end
+
+function Tree:_copy_visual()
+  local line1, line2 = self:_visual_line_range()
+  self:copy_lines(line1, line2, "copy")
+end
+
+function Tree:_nodes_in_range(line1, line2)
+  if not self.visible_nodes then
+    return {}
+  end
+  if line1 > line2 then
+    line1, line2 = line2, line1
+  end
+  local nodes = {}
+  for i = line1, line2 do
+    local node = self.visible_nodes[i]
+    if node then
+      nodes[#nodes + 1] = node
+    end
+  end
+  return nodes
+end
+
+function Tree:_copy_visual_contents()
+  local line1, line2 = self:_visual_line_range()
+  self:copy_contents(self:_nodes_in_range(line1, line2))
+end
+
+---@param action "copy"|"cut"
+---@param src string
+---@param dest string
+---@param cb fun(ok: boolean)
+function Tree:_commit_one(action, src, dest, cb)
+  dest = normalize_path(dest)
+  src = normalize_path(src)
+  local lst = (vim.uv or vim.loop).fs_lstat(src)
+  if not lst then
+    vim.notify("Source is gone: " .. src, vim.log.levels.ERROR)
+    cb(true)
+    return
+  end
+
+  if lst.type == "directory" and src ~= dest and copy_fs.contains(src, dest) then
+    vim.notify("Cannot paste a directory into itself", vim.log.levels.WARN)
+    cb(false)
+    return
+  end
+
+  if action == "cut" and src == dest then
+    vim.notify("Already there", vim.log.levels.INFO)
+    cb(true)
+    return
+  end
+
+  local parent = normalize_path(vim.fn.fnamemodify(dest, ":h"))
+  if parent ~= "" and parent ~= dest and vim.fn.isdirectory(parent) == 0 then
+    if vim.fn.mkdir(parent, "p") == 0 then
+      vim.notify("Failed to create " .. parent, vim.log.levels.ERROR)
+      cb(false)
+      return
+    end
+  end
+
+  if src == dest or (vim.uv or vim.loop).fs_lstat(dest) then
+    vim.ui.input({
+      prompt = "Paste as: ",
+      default = unique_paste_path(dest),
+      completion = "file",
+    }, function(new_dest)
+      if not new_dest or vim.trim(new_dest) == "" then
+        cb(false)
+        return
+      end
+      self:_commit_one(action, src, new_dest, cb)
+    end)
+    return
+  end
+
+  if action == "cut" then
+    local moved, err = self:_move_path(src, dest)
+    if not moved then
+      vim.notify("Failed to move: " .. (err or dest), vim.log.levels.ERROR)
+      cb(false)
+      return
+    end
+    retarget_buffers(src, dest)
+    prune_fs(self.root_path, vim.fn.fnamemodify(src, ":h"))
+    vim.notify("Moved " .. src .. " → " .. dest, vim.log.levels.INFO)
+    cb(true)
+    return
+  end
+
+  local result = copy_fs(src, dest)
+  if not result.ok then
+    vim.notify("Failed to copy: " .. (result.err or dest), vim.log.levels.ERROR)
+    cb(false)
+    return
+  end
+  vim.notify("Copied " .. src .. " → " .. dest, vim.log.levels.INFO)
+  cb(true)
+end
+
+--- Paste the staged files into `node` (or into its parent when `node` is a file).
+---@param node bsi.Node|nil
+function Tree:paste_clipboard(node)
+  local clip = M.file_clip
+  if not clip or not clip.paths or #clip.paths == 0 then
+    vim.notify("Nothing to paste", vim.log.levels.WARN)
+    return
+  end
+  local dest_dir = self:_paste_dir(node)
+  if not dest_dir then
+    return
+  end
+
+  local paths = {}
+  for i, path in ipairs(clip.paths) do
+    paths[i] = path
+  end
+  local action = clip.action
+  local last_dest
+
+  local function step(i)
+    if i > #paths then
+      M.file_clip = nil
+      self:refresh()
+      if last_dest and self.winid and vim.api.nvim_win_is_valid(self.winid) then
+        self:find_file(last_dest)
+      end
+      return
+    end
+    local src = paths[i]
+    local base = vim.fn.fnamemodify(src, ":t")
+    if base == "" then
+      step(i + 1)
+      return
+    end
+    self:_commit_one(action, src, dest_dir .. "/" .. base, function(ok)
+      if not ok then
+        local rest = {}
+        for j = i, #paths do
+          rest[#rest + 1] = paths[j]
+        end
+        M.file_clip = { action = action, paths = rest }
+        self:_redraw_clip()
+        return
+      end
+      last_dest = dest_dir .. "/" .. base
+      step(i + 1)
+    end)
+  end
+
+  step(1)
+end
+
+function Tree:_paste_cursor()
+  self:paste_clipboard(self:_cursor_node())
+end
+
+local CAT_MAX = 512 * 1024
+
+---@param path string
+---@return string|nil
+---@return string|nil err
+local function read_cat_file(path)
+  local uv = vim.uv or vim.loop
+  local lst = uv.fs_stat(path)
+  if not lst or lst.type ~= "file" then
+    return nil, "missing"
+  end
+  if lst.size == 0 then
+    return ""
+  end
+  local fd, open_err = uv.fs_open(path, "r", 438)
+  if not fd then
+    return nil, open_err or "unreadable"
+  end
+  local n = math.min(lst.size, CAT_MAX)
+  local data = uv.fs_read(fd, n, 0) or ""
+  uv.fs_close(fd)
+  if data:find("\0", 1, true) then
+    return "[binary " .. lst.size .. " bytes]"
+  end
+  if lst.size > CAT_MAX then
+    if data:sub(-1) ~= "\n" then
+      data = data .. "\n"
+    end
+    data = data .. "[truncated]\n"
+  end
+  return data
+end
+
+---@param dir string
+---@return { name: string, path: string }[]|nil
+local function list_dir_files(dir)
+  local uv = vim.uv or vim.loop
+  local handle = uv.fs_scandir(dir)
+  if not handle then
+    return nil
+  end
+  local files = {}
+  while true do
+    local name, etype = uv.fs_scandir_next(handle)
+    if not name then
+      break
+    end
+    local full = dir .. "/" .. name
+    local include = etype == "file"
+    if etype == "link" or not etype then
+      local st = uv.fs_stat(full)
+      include = st ~= nil and st.type == "file"
+    end
+    if include then
+      files[#files + 1] = { name = name, path = full }
+    end
+  end
+  table.sort(files, function(a, b)
+    return a.name:lower() < b.name:lower()
+  end)
+  return files
+end
+
+---@param data string
+---@return string[]
+local function body_lines(data)
+  if data == "" then
+    return { "" }
+  end
+  local lines = vim.split(data, "\n", { plain = true })
+  if lines[#lines] == "" then
+    table.remove(lines)
+  end
+  if #lines == 0 then
+    return { "" }
+  end
+  return lines
+end
+
+--- Text of one file, or of the files directly inside a directory.
+--- Subdirectories are not included. A directory listing labels each file.
+---@param node bsi.Node|nil
+---@return string|nil
+---@return string|nil err
+function Tree:cat_text(node)
+  if not node or not node.path then
+    return nil, "missing"
+  end
+  local path = normalize_path(node.path)
+  local uv = vim.uv or vim.loop
+  local lst = uv.fs_stat(path)
+  if not lst then
+    return nil, "missing"
+  end
+  local as_dir = lst.type == "directory" or node.type == "directory" or node.type == "root"
+  if not as_dir then
+    return read_cat_file(path)
+  end
+
+  local files = list_dir_files(path)
+  if not files then
+    return nil, "unreadable"
+  end
+  if #files == 0 then
+    return nil, "empty"
+  end
+  local lines = {}
+  for i, file in ipairs(files) do
+    if i > 1 then
+      lines[#lines + 1] = ""
+    end
+    lines[#lines + 1] = "==> " .. file.name .. " <=="
+    local body, err = read_cat_file(file.path)
+    if not body then
+      lines[#lines + 1] = "[" .. (err or "unreadable") .. "]"
+    else
+      for _, line in ipairs(body_lines(body)) do
+        lines[#lines + 1] = line
+      end
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+--- Put file contents on the paste registers. One file is the raw text.
+--- A directory, or several nodes, is the same labeled listing `cat_text` builds.
+---@param node_or_nodes bsi.Node|bsi.Node[]|nil
+---@return string|nil
+function Tree:copy_contents(node_or_nodes)
+  local nodes = node_or_nodes
+  if nodes and nodes.path then
+    nodes = { nodes }
+  end
+  if type(nodes) ~= "table" or #nodes == 0 then
+    vim.notify("Nothing to copy", vim.log.levels.WARN)
+    return nil
+  end
+
+  local chunks = {}
+  local empty = false
+  for _, node in ipairs(nodes) do
+    if node and node.type ~= "root" then
+      local text, err = self:cat_text(node)
+      if text then
+        chunks[#chunks + 1] = text
+      elseif err == "empty" then
+        empty = true
+      end
+    end
+  end
+  if #chunks == 0 then
+    if empty then
+      vim.notify("No files to copy", vim.log.levels.WARN)
+    else
+      vim.notify("Nothing to copy", vim.log.levels.WARN)
+    end
+    return nil
+  end
+
+  local text = table.concat(chunks, "\n\n")
+  vim.fn.setreg("+", text)
+  vim.fn.setreg('"', text)
+  vim.notify("Copied contents", vim.log.levels.INFO)
+  return text
+end
+
 ---@param full boolean
 function Tree:_yank(full)
   if not self.visible_nodes or #self.visible_nodes == 0 then
@@ -1018,11 +1604,11 @@ function Tree:_yank(full)
   if text == "" then
     text = "."
   end
+  -- Both registers now. A deferred "+" write loses to clipboard=unnamedplus
+  -- and a paste can still see the previous clipboard value.
+  vim.fn.setreg("+", text)
   vim.fn.setreg('"', text)
   vim.notify("Yanked " .. text, vim.log.levels.INFO)
-  vim.schedule(function()
-    vim.fn.setreg("+", text)
-  end)
 end
 
 function Tree:_add_file()
@@ -1425,6 +2011,8 @@ function M.setup(opts)
   vim.api.nvim_set_hl(0, "BSITreeGitAdded", { fg = "#9ece6a", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitModified", { fg = "#e0af68", bg = "NONE" })
   vim.api.nvim_set_hl(0, "BSITreeGitDeleted", { fg = "#f7768e", bg = "NONE" })
+  vim.api.nvim_set_hl(0, "BSITreeCopied", { fg = "#9ece6a", italic = true })
+  vim.api.nvim_set_hl(0, "BSITreeCut", { fg = "#f7768e", italic = true })
 
   local group = vim.api.nvim_create_augroup("BSITreeTracking", { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {

@@ -4,7 +4,7 @@ return {
         vim.fn.expand("~/.local/share/nvim/mason/bin/gopls")
     },
     filetypes = { 'go', 'gomod', 'gowork', 'gotmpl', 'gosum' },
-    root_markers = { 'go.mod', 'go.work', '.git' },
+    root_dir = require("core.lsp_root").go_root_dir("gopls"),
     settings = {
         gopls = {
             gofumpt = true,

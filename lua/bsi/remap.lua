@@ -1,4 +1,5 @@
 local nvim        = require("bsi.utils.nvim")
+local jsonkv      = require("bsi.jsonkv")
 local ai          = require("bsi.ai")
 local ide         = require("bsi.ide")
 local system      = require("bsi.system")
@@ -207,6 +208,31 @@ end, {
     noremap = true,
     silent = true,
     desc = "Yank current line as snippet (filename + range)",
+})
+
+-- Squash JSON into `key = value` lines on the paste registers.
+-- <leader>k is Keyword, so this stays on the yank prefix.
+vim.api.nvim_create_user_command("JsonKV", function(opts)
+    jsonkv.command(opts)
+end, {
+    range = true,
+    desc = "Squash JSON to key = value lines on the paste registers",
+})
+vim.keymap.set("n", "<leader>yk", function()
+    jsonkv.squash(1, vim.api.nvim_buf_line_count(0))
+end, {
+    noremap = true,
+    silent = true,
+    desc = "Squash JSON buffer to key = value",
+})
+vim.keymap.set("v", "<leader>yk", function()
+    local start_line = vim.fn.line("v")
+    local end_line = vim.fn.line(".")
+    jsonkv.squash(start_line, end_line)
+end, {
+    noremap = true,
+    silent = true,
+    desc = "Squash selected JSON to key = value",
 })
 ---
 
