@@ -163,6 +163,23 @@ describe("lsp root", function()
             })
             assert.equals(abs(tmp), root)
         end)
+
+        it("resolves the root after go env returns", function()
+            write_file(tmp .. "/go.work", "go 1.22\n\nuse ./mod\n")
+            touch(tmp .. "/mod/go.mod")
+            touch(tmp .. "/mod/main.go")
+            local buf = vim.api.nvim_create_buf(false, true)
+            vim.api.nvim_buf_set_name(buf, tmp .. "/mod/main.go")
+            local root
+            lsp_root.go_root_dir("gopls")(buf, function(dir)
+                root = dir
+            end)
+            vim.wait(5000, function()
+                return root ~= nil
+            end)
+            assert.equals(vim.uv.fs_realpath(tmp), vim.uv.fs_realpath(root))
+            vim.api.nvim_buf_delete(buf, { force = true })
+        end)
     end)
 
     describe("typescript", function()

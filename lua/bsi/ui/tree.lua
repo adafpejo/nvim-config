@@ -1,6 +1,6 @@
 -- lua/bsi/ui/tree.lua
 -- BSI Tree: filesystem file tree with scan-based gitignore greying and async +N-M.
--- No porcelain status, directory AMD summaries, git-only mode, or Project watchers.
+-- <leader>eg lists git changes from porcelain only. Filesystem toggle stays a full scan.
 
 local M = {}
 
@@ -77,6 +77,8 @@ local system = require("bsi.system")
 local git_ignore = require("bsi.git.ignore")
 local git_numstat = require("bsi.git.numstat")
 local git_amd = require("bsi.git.amd")
+local git_tree = require("bsi.ui.git_tree")
+local diff_panel = require("bsi.ui.bsi_diff_view_panel")
 
 --- Safely close a window, handling the "cannot close last window" (E444) case.
 local function safe_close_win(winid)
@@ -347,6 +349,25 @@ function Tree.new(opts)
   self._amd = opts.amd or git_amd
   self._git_gen = 0
   self._width_manual = false
+  self.git_view = opts.git_view and true or false
+
+  if self.git_view then
+    self.state = {
+      root = {
+        id = self.root_path,
+        name = vim.fn.fnamemodify(self.root_path, ":t"),
+        path = self.root_path,
+        type = "root",
+        depth = 0,
+        expanded = true,
+        children = {},
+      },
+    }
+    self._visible_dirty = true
+    self.bufnr = opts.bufnr
+    self.winid = opts.winid
+    return self
+  end
 
   local root = self.provider:scan(self.root_path, 0, self._scan_opts)
   self.state = {
@@ -449,6 +470,11 @@ local function merge_chain_name(display_name, old_path, scanned_name)
 end
 
 function Tree:_load_directory(node)
+  if self.git_view then
+    node.children = node.children or {}
+    node._unpopulated = false
+    return
+  end
   local guard = {}
   while true do
     if guard[node.path] then
@@ -607,6 +633,9 @@ function Tree:_update_winbar()
     return
   end
   local title = self:get_root_path()
+  if self.git_view then
+    title = title .. " · changes"
+  end
   if self._refreshing then
     title = title .. " (refreshing...)"
   end
@@ -682,6 +711,10 @@ function Tree:open()
     self:toggle_show_ignored()
   end, "Toggle ignored dirs (node_modules, vendor, .git, …)")
   map("q", function()
+    if self.git_view or self._bsi_a or self._bsi_b then
+      diff_panel.quit(self)
+      return
+    end
     safe_close_win(vim.api.nvim_get_current_win())
   end, "Close")
   map("<CR>", function()
@@ -696,6 +729,9 @@ function Tree:open()
   map("D", function()
     self:_diff_file()
   end, "Diff file")
+  if self.git_view then
+    self:_bind_git_keys()
+  end
   map("a", function()
     self:_add_file()
   end, "Add new file")
@@ -745,8 +781,86 @@ function Tree:open()
   end, "Go to bottom of tree")
 end
 
+function Tree:_collect_collapsed()
+  local set = {}
+  local function walk(node)
+    if node.type == "directory" and not node.expanded then
+      set[node.path] = true
+    end
+    for _, child in ipairs(node.children or {}) do
+      walk(child)
+    end
+  end
+  if self.state and self.state.root then
+    walk(self.state.root)
+  end
+  return set
+end
+
+function Tree:_load_git_view()
+  local was_git = self.git_view and true or false
+  self.git_view = true
+  self._git_gen = (self._git_gen or 0) + 1
+  local gen = self._git_gen
+  self._refreshing = true
+  self.state.root = {
+    id = self.root_path,
+    name = vim.fn.fnamemodify(self.root_path, ":t"),
+    path = self.root_path,
+    type = "root",
+    depth = 0,
+    expanded = true,
+    children = {},
+  }
+  self._visible_dirty = true
+  if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+    self:render()
+  end
+  self:_update_winbar()
+  diff_panel.remember(self)
+  local start = self.root_path
+  git_tree.fetch(start, function(git_root, map)
+    if gen ~= self._git_gen then
+      return
+    end
+    self._refreshing = false
+    if not git_root or type(map) ~= "table" then
+      if not was_git then
+        self.git_view = false
+        self:refresh()
+      else
+        self:_update_winbar()
+      end
+      vim.notify("Not a git repository", vim.log.levels.WARN)
+      return
+    end
+    self.root_path = git_root
+    if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+      vim.b[self.bufnr].bsi_tree_root = git_root
+    end
+    local built = git_tree.build(git_root, map)
+    git_tree.apply_collapsed(built, self._git_collapsed)
+    self.state.root = built
+    self._amd_map = map
+    self._visible_dirty = true
+    self._width_manual = false
+    if self.bufnr and vim.api.nvim_buf_is_valid(self.bufnr) then
+      self:render()
+    end
+    self:_update_winbar()
+    self:_bind_git_keys()
+    self:_select_git_change()
+    self:_fetch_numstat(gen)
+  end)
+end
+
 --- Re-scan filesystem, preserving expansion state
 function Tree:refresh()
+  if self.git_view then
+    self._git_collapsed = self:_collect_collapsed()
+    self:_load_git_view()
+    return
+  end
   local expanded = {}
   local function mark_expanded(path)
     if path and path ~= "" then
@@ -965,6 +1079,75 @@ function Tree:_edit_in_editor(path)
   vim.cmd("edit " .. vim.fn.fnameescape(path))
 end
 
+function Tree:_bind_git_keys()
+  if not self.git_view or self._git_keys_bound or not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then
+    return
+  end
+  self._git_keys_bound = true
+  vim.keymap.set("n", "j", function()
+    self:_git_step("next")
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Next change" })
+  vim.keymap.set("n", "k", function()
+    self:_git_step("prev")
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Previous change" })
+end
+
+function Tree:_git_step(direction)
+  local nodes = self.visible_nodes or {}
+  if not self.winid or not vim.api.nvim_win_is_valid(self.winid) then
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(self.winid)[1]
+  local dest = diff_panel.step(nodes, row, direction, vim.v.count1)
+  if not dest then
+    return
+  end
+  vim.api.nvim_win_set_cursor(self.winid, { dest, 0 })
+  local node = nodes[dest]
+  if node and node.type == "file" then
+    self._git_selected = node.path
+    diff_panel.show(self, node.path)
+  end
+end
+
+function Tree:_select_git_change()
+  local nodes = self.visible_nodes or {}
+  local want = self._git_selected
+  local opened = M.get_opened_file()
+  local pick
+  for i, node in ipairs(nodes) do
+    if node.type == "file" and node.path == want then
+      pick = i
+      break
+    end
+  end
+  if not pick and opened ~= "" then
+    for i, node in ipairs(nodes) do
+      if node.type == "file" and node.path == opened then
+        pick = i
+        break
+      end
+    end
+  end
+  if not pick then
+    for i, node in ipairs(nodes) do
+      if node.type == "file" then
+        pick = i
+        break
+      end
+    end
+  end
+  if not pick then
+    return
+  end
+  if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    pcall(vim.api.nvim_win_set_cursor, self.winid, { pick, 0 })
+    vim.api.nvim_set_current_win(self.winid)
+  end
+  self._git_selected = nodes[pick].path
+  diff_panel.show(self, nodes[pick].path)
+end
+
 function Tree:_open_file()
   if not self.visible_nodes or #self.visible_nodes == 0 then
     return
@@ -972,6 +1155,11 @@ function Tree:_open_file()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local node = self.visible_nodes[cursor[1]]
   if not node or node.type ~= "file" then
+    return
+  end
+  if self.git_view then
+    self._git_selected = node.path
+    diff_panel.show(self, node.path)
     return
   end
   self:_edit_in_editor(node.path)
@@ -997,6 +1185,11 @@ function Tree:_diff_file()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local node = self.visible_nodes[cursor[1]]
   if not node or node.type ~= "file" then
+    return
+  end
+  if self.git_view then
+    self._git_selected = node.path
+    diff_panel.show(self, node.path)
     return
   end
   vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(node.path))
@@ -1863,7 +2056,7 @@ function Tree:navigate_file(direction)
     local current = (direction == "up") and self:_find_parent_node(node) or node
 
     while current and (current.type == "directory" or current.type == "root") do
-      if not current.children or #current.children == 0 or current._unpopulated then
+      if not self.git_view and (not current.children or #current.children == 0 or current._unpopulated) then
         local scanned = self.provider:scan(current.path, current.depth, {
           show_ignored = self.show_ignored,
         })
@@ -1950,8 +2143,49 @@ function M.toggle_tree()
   vim.cmd("wincmd l")
 end
 
---- Compatibility stub: git-changes mode was removed (laggy on large change sets).
---- Opens / focuses the normal filesystem tree instead.
+function M._visible_tree()
+  if M.the_tree and M.the_tree.winid and vim.api.nvim_win_is_valid(M.the_tree.winid) then
+    return M.the_tree
+  end
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.bo[buf].filetype == "Tree" then
+      local inst = M.instances[buf]
+      if inst then
+        M.the_tree = inst
+        return inst
+      end
+    end
+  end
+end
+
+function M.open_git_view()
+  local t = M._visible_tree()
+  if t and t.git_view and t.winid and vim.api.nvim_win_is_valid(t.winid) then
+    diff_panel.close(t)
+    if vim.api.nvim_win_is_valid(t.winid) then
+      pcall(vim.api.nvim_set_current_win, t.winid)
+      pcall(vim.api.nvim_set_option_value, "winfixbuf", false, { win = t.winid })
+      pcall(vim.api.nvim_set_option_value, "winfixwidth", false, { win = t.winid })
+    end
+    safe_close_win(t.winid)
+    if M.the_tree == t then
+      M.the_tree = nil
+    end
+    return
+  end
+  if t then
+    t._git_collapsed = nil
+    t:_load_git_view()
+    return
+  end
+  local created = M.new({ git_view = true })
+  created:open()
+  M.the_tree = created
+  created:_load_git_view()
+end
+
+--- Compatibility stub: filesystem tree. Git changes open with open_git_view.
 function M.show_in_git_mode()
   if M.the_tree and M.the_tree.winid and vim.api.nvim_win_is_valid(M.the_tree.winid) then
     return

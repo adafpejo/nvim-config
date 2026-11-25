@@ -533,9 +533,18 @@ The system SHALL provide a filesystem-only file tree as a left sidebar. Toggling
 - **WHEN** the user runs `:BSITree` with a directory argument
 - **THEN** a tree opens with that directory as root
 
-### Requirement: Git-only tree mode is not offered
+### Requirement: Git changes view lists porcelain paths only
 
-The tree SHALL always list the filesystem. It MUST NOT switch to a listing of only git-changed files. The legacy git-mode mapping SHALL open or focus the same filesystem tree.
+`<leader>eg` SHALL open the tree on git changes and use that tree as the file panel. The listing SHALL be built from `git status` paths, not a filesystem scan. Directories with a single child directory SHALL collapse the same way as the filesystem tree. The first changed file SHALL open in BsiDiffViewPanel as a side-by-side HEAD versus worktree diff in the current tab, without an extra key. Focus SHALL stay in the tree. `j` and `k` SHALL move to the next or previous changed file and show that file in the same BsiDiffViewPanel windows. `q` SHALL close that diff, return the tree to the filesystem listing, and show the buffer that was open before the diff. Pressing `<leader>eg` again SHALL close the tree and those BsiDiffViewPanel windows and SHALL leave the tab open. The filesystem toggle SHALL keep listing the filesystem. `D` on a filesystem file SHALL still open that path with Diffview. The legacy git-mode mapping SHALL open or focus the filesystem tree.
+
+#### Scenario: Open git changes
+
+- **WHEN** the user presses `<leader>eg` in a git repository
+- **THEN** the tree lists changed files
+- **AND** ignored paths are omitted
+- **AND** the first changed file is shown as a BsiDiffViewPanel HEAD versus worktree diff in the current tab
+- **AND** `j` and `k` move between changed files and update that diff in the same windows
+- **AND** `q` closes the diff, lists the filesystem in the tree, and shows the previous buffer
 
 #### Scenario: Legacy git-mode mapping
 

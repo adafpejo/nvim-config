@@ -20,20 +20,6 @@ vim.keymap.set("n", "<leader>hp", ":lua require('harpoon.ui').nav_prev()<CR>", {
 vim.keymap.set("n", "<leader>ht", ":lua require('harpoon.term').gotoTerminal(1)<CR>", { desc = "Terminal", noremap = true })
 
 -- gitsigns
-vim.keymap.set('n', ']c', function()
-    if vim.wo.diff then
-        vim.cmd.normal({ ']c', bang = true })
-    else
-        gitsigns.nav_hunk('next')
-    end
-end, { desc = 'Next hunk' })
-vim.keymap.set('n', '[c', function()
-    if vim.wo.diff then
-        vim.cmd.normal({ '[c', bang = true })
-    else
-        gitsigns.nav_hunk('prev')
-    end
-end, { desc = 'Previous hunk' })
 vim.keymap.set('n', '<leader>hs', gitsigns.stage_hunk)
 vim.keymap.set('n', '<leader>hr', gitsigns.reset_hunk)
 vim.keymap.set('v', '<leader>hs', function() gitsigns.stage_hunk { vim.fn.line('.'), vim.fn.line('v') } end)
@@ -108,6 +94,9 @@ vim.keymap.set('n', '<leader>td', gitsigns.toggle_deleted)
 vim.keymap.set("n", "<leader>ee", function()
     require("bsi.ui.tree").toggle_tree()
 end, { noremap = true, desc = "Toggle BSI Tree" })
+vim.keymap.set("n", "<leader>eg", function()
+    require("bsi.ui.tree").open_git_view()
+end, { noremap = true, desc = "BSI Tree: git changes" })
 
 -- BSI Tree open/focus (legacy <leader>ge alias; git-changes mode was removed for performance)
 vim.keymap.set("n", "<leader>ge", function()

@@ -233,21 +233,21 @@ end
 
 local function go_env(key, child, done)
     vim.system({ "go", "env", key }, { text = true }, function(output)
-        local dir = vim.trim(output.stdout or "")
-        if output.code == 0 and dir ~= "" then
-            if child then
-                dir = vim.fs.joinpath(dir, child)
-            end
-            done(vim.fs.normalize(dir))
-            return
-        end
         vim.schedule(function()
+            local dir = vim.trim(output.stdout or "")
+            if output.code == 0 and dir ~= "" then
+                if child then
+                    dir = vim.fs.joinpath(dir, child)
+                end
+                done(vim.fs.normalize(dir))
+                return
+            end
             vim.notify(
                 ("[gopls] go env %s failed with code %d: %s"):format(key, output.code, output.stderr or ""),
                 vim.log.levels.WARN
             )
+            done("")
         end)
-        done("")
     end)
 end
 
