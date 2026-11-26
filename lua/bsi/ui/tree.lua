@@ -1090,6 +1090,21 @@ function Tree:_bind_git_keys()
   vim.keymap.set("n", "k", function()
     self:_git_step("prev")
   end, { buffer = self.bufnr, silent = true, desc = "Tree: Previous change" })
+  vim.keymap.set("n", "]c", function()
+    diff_panel.jump(self, vim.v.count1)
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Next diff change" })
+  vim.keymap.set("n", "[c", function()
+    diff_panel.jump(self, -vim.v.count1)
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Previous diff change" })
+  vim.keymap.set("n", ">", function()
+    diff_panel.nudge(self, 8)
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Widen diff" })
+  vim.keymap.set("n", "<", function()
+    diff_panel.nudge(self, -8)
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Narrow diff" })
+  vim.keymap.set("n", "i", function()
+    diff_panel.open_in_tree(self)
+  end, { buffer = self.bufnr, silent = true, desc = "Tree: Open change in filesystem tree" })
 end
 
 function Tree:_git_step(direction)
@@ -2105,6 +2120,20 @@ function M.get_root_path(bufnr)
 end
 
 function M.toggle_tree()
+  local open = M._visible_tree()
+  if open and open.winid and vim.api.nvim_win_is_valid(open.winid) and (open.git_view or open._bsi_a or open._bsi_b) then
+    diff_panel.leave(open)
+    if vim.api.nvim_win_is_valid(open.winid) then
+      pcall(vim.api.nvim_set_current_win, open.winid)
+      pcall(vim.api.nvim_set_option_value, "winfixbuf", false, { win = open.winid })
+      pcall(vim.api.nvim_set_option_value, "winfixwidth", false, { win = open.winid })
+      safe_close_win(open.winid)
+    end
+    if M.the_tree == open then
+      M.the_tree = nil
+    end
+    return
+  end
   if M.the_tree and M.the_tree.winid and vim.api.nvim_win_is_valid(M.the_tree.winid) then
     safe_close_win(M.the_tree.winid)
     M.the_tree = nil
